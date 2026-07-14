@@ -222,6 +222,7 @@ GameObject:
   - component: {fileID: 594609546}
   - component: {fileID: 594609545}
   - component: {fileID: 594609547}
+  - component: {fileID: 594609548}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -271,6 +272,33 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 58d1b9d3a467abf40beb1134d0b9bea9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Selection_Manager
+  selectionPrefab: {fileID: 341945400208659860, guid: 86b5bf360a71bad429c0b2da68e86b1c, type: 3}
+  randomColors:
+  - {r: 0.654902, g: 0.54509807, b: 0.98039216, a: 0}
+  - {r: 0.36862746, g: 0.91764706, b: 0.83137256, a: 0}
+  - {r: 0.99215686, g: 0.7294118, b: 0.45490196, a: 0}
+  - {r: 0.99215686, g: 0.9019608, b: 0.5411765, a: 0}
+  - {r: 0.9764706, g: 0.65882355, b: 0.83137256, a: 0}
+  - {r: 0.5254902, g: 0.9372549, b: 0.6745098, a: 0}
+  - {r: 0.5764706, g: 0.77254903, b: 0.99215686, a: 0}
+  - {r: 0.9882353, g: 0.64705884, b: 0.64705884, a: 0}
+  - {r: 0.76862746, g: 0.70980394, b: 0.99215686, a: 0}
+  - {r: 0.9882353, g: 0.22745098, b: 0.64705884, a: 0}
+  dragAlpha: 0.3
+  lockedAlpha: 0.7
+--- !u!114 &594609548
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 594609544}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 78d2d07e9fc42894f8ec3a8b263febf3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GameManager
+  gridManager: {fileID: 594609545}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

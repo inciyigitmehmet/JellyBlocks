@@ -1,7 +1,9 @@
+using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using Unity.VisualScripting;
 using UnityEngine;
-
+using System.Collections;
 public class Selection_Manager : MonoBehaviour
 
 {
@@ -17,11 +19,23 @@ public class Selection_Manager : MonoBehaviour
     //Matriste elini kaldırdığında nerede?
     private Vector2Int currentCoords;
 
-    // Oyun ilk açıldığında Gizmos'un (0,0) noktasını sahte bir şekilde yeşile boyamasını engellemek için kontrol ediyoruz.
-    private bool hasSelectedOnce = false;
+    //GameManager.cs ile Selection_Manager'ı birbirine tanıtma.
+    public GameManager gameManager;
 
+    //Görsel Ayarlar
+    public GameObject selectionPrefab; //Unityde oluşturduğum jelly karesini burada atıyoruz.
+    private GameObject currentSelectionObj; //Oyuncunun sürüklediği kare ( geçici obje buraya atandı.)
 
+    //Geçici objenin renk ve çizgi özelliklerine buradan ulaşabiliyoruz.
+    private SpriteRenderer currentSpriteRenderer; 
+    private LineRenderer currentLineRenderer;
 
+    public Color[] randomColors; // Bu kısımda rastgele renkleri gireceğim.
+
+    public float dragAlpha = 0.3f; // Bu kısım sürüklerken iç dolgunun şeffaflık oranı.
+    public float lockedAlpha = 0.7f; // Burası ise parmak kalkınca kalıcı iç dolgunun şeffaflık oranı
+
+    private List<GameObject> permanentSelections = new List<GameObject>();
 
 void Start()
      {
@@ -32,30 +46,78 @@ void Start()
     void Update()
     {
         //ekrana dokunuyor mu dokunuyorsa true yap.
-       if (Input.GetMouseButtonDown(0))
+        if (Input.GetMouseButtonDown(0))
+
         {
-            Vector2Int clickedCoords = GetCurrentTileCoords();
-
-            //Oyuncu Grid dışında bir yere dokunulmadığı zaman tıklandı sayar ve ona göre yerleri belirler.
-            if(gridManager != null && clickedCoords.x >= 0 && clickedCoords.x < gridManager.width && clickedCoords.y >= 0 && clickedCoords.y < gridManager.height)
-                {
-                isSelecting = true;
-                hasSelectedOnce = true;
-                startCoords = clickedCoords;
-                currentCoords = startCoords;
-                }
-
-            else
-            {
-                //Bu kısım grid dışına tıklanınca renk değişimini engeller.
-                isSelecting = false;
-
-            }
+            HandleTouchDown();//ekrana dokunma anı.
 
         }
 
-        // Elini basılı tutup sürüklediğin sürece (Sadece geçerli bir seçim başladıysa çalışır)
         if (Input.GetMouseButton(0) && isSelecting)
+        {
+            HandleTouchDrag();//Basılı tutup sürükleme anı
+        }
+
+        if (Input.GetMouseButtonUp(0))
+        {
+            HandleTouchUp();//Ekrandan elini çektiği an
+        }
+
+    }
+
+    void HandleTouchDown()
+    {
+        Vector2Int clickedCoords = GetCurrentTileCoords();
+
+        //Oyuncu Grid dışında bir yere dokunulmadığı zaman tıklandı sayar ve ona göre yerleri belirler.
+        if (gridManager != null && clickedCoords.x >= 0 && clickedCoords.x < gridManager.width && clickedCoords.y >= 0 && clickedCoords.y < gridManager.height)
+        {
+            isSelecting = true;
+            startCoords = clickedCoords;
+            currentCoords = startCoords;
+
+
+            currentSelectionObj = Instantiate(selectionPrefab);
+            currentSpriteRenderer = currentSelectionObj.GetComponent<SpriteRenderer>();
+            currentLineRenderer = currentSelectionObj.GetComponent<LineRenderer>();
+
+            Color pickedColor = Color.white;
+
+            if (randomColors.Length > 0)
+            {
+                int randomIndex = Random.Range(0, randomColors.Length);
+                pickedColor = randomColors[randomIndex];
+            }
+
+            if (currentSpriteRenderer != null)
+            {
+                Color fillColor = pickedColor;
+                fillColor.a = dragAlpha;
+                currentSpriteRenderer.color = fillColor;
+            }
+
+            if (currentLineRenderer != null)
+            {
+                currentLineRenderer.startColor = pickedColor;
+                currentLineRenderer.endColor = pickedColor;
+                currentLineRenderer.positionCount = 5;
+
+                UpdateSelectionVisual();
+            }
+
+
+
+        }
+        else
+        {
+            //Bu kısım grid dışına tıklanınca renk değişimini engeller.
+            isSelecting = false;
+
+        }
+    }
+
+        // Elini basılı tutup sürüklediğin sürece (Sadece geçerli bir seçim başladıysa çalışır)
+        void HandleTouchDrag()
         {
             
             // Sürüklerken de grid dışına taşmayı engellemek için sadece grid içindeyse güncelliyoruz.
@@ -65,15 +127,113 @@ void Start()
                 currentCoords = hooverCoords;
             }
 
+
+        UpdateSelectionVisual();
+
         }
-        
-       //ekrana dokunuyor mu dokunmuyorsa false yap.
-        if (Input.GetMouseButtonUp(0))
+
+    //ekrana dokunuyor mu dokunmuyorsa false yap.
+    void HandleTouchUp()
+    {
+        // Sürükleme işlemini bitiriyoruz
+        isSelecting = false;
+
+        // 1. SEÇİLEN ALANIN KÖŞELERİNİ VE TOPLAM BOYUTUNU HESAPLAMA
+        int minX = Mathf.Min(startCoords.x, currentCoords.x);
+        int maxX = Mathf.Max(startCoords.x, currentCoords.x);
+        int minY = Mathf.Min(startCoords.y, currentCoords.y);
+        int maxY = Mathf.Max(startCoords.y, currentCoords.y);
+
+        // Dikdörtgenin alan formülü: (Genişlik) * (Yükseklik)
+        int selectedArea = (maxX - minX + 1) * (maxY - minY + 1);
+
+        // 2. KONTROL DEĞİŞKENLERİ
+        bool hasOverlap = false; // Başka bir jölenin üstüne bindi mi?
+        int numberCount = 0;     // Seçilen alanda kaç tane sayı var?
+        int foundNumber = 0;     // Bulunan sayı kaç?
+
+        // 3. SEÇİLEN ALANIN İÇİNDEKİ TÜM HÜCRELERİ (TILE) TARAMA
+        for (int x = minX; x <= maxX; x++)
         {
-            // Elini kaldırdığında sürükleme bitsin ama son koordinatlar hafızada kalsın.
-            isSelecting = false;
+            for (int y = minY; y <= maxY; y++)
+            {
+                // GridManager'dan o koordinattaki hücreyi istiyorum.
+                GameObject tileObj = gridManager.GetTileAt(x, y);
+
+                if (tileObj != null)
+                {
+                    Tile tileComponent = tileObj.GetComponent<Tile>();
+
+                    // KURAL 1: Seçilen kare daha önceden doldurulmuş mu?
+                    if (tileComponent.isFilled)
+                    {
+                        hasOverlap = true;
+                    }
+
+                    // KURAL 2: Karenin içinde ipucu (sayı) var mı?
+                    if (tileComponent.targetNumber > 0)
+                    {
+                        numberCount++; // Sayı bulduk, sayacı artır.
+                        foundNumber = tileComponent.targetNumber; // Sayıyı hafızaya al.
+                    }
+                }
+            }
         }
+
+        // 4. SHIKAKU KURALLARINI DEĞERLENDİRME
+        bool isMoveValid = false;
+
+        // Eğer üst üste binme YOKSA (hasOverlap false) VE
+        // Tam olarak 1 tane sayı varsa (numberCount == 1) VE
+        // Bulunan sayı, çizdiğimiz alana eşitse (foundNumber == selectedArea)
+        if (!hasOverlap && numberCount == 1 && foundNumber == selectedArea)
+        {
+            isMoveValid = true; //eğer buraya kadar geliyorsa hamle geçerli
+        }
+
+        // 5. SONUÇ
+        if (isMoveValid)
+        {
+            // --- BAŞARILI HAMLE ---
+            if (currentSpriteRenderer != null)
+            {
+                Color finalColor = currentSpriteRenderer.color;
+                finalColor.a = lockedAlpha;
+                currentSpriteRenderer.color = finalColor;
+            }
+            permanentSelections.Add(currentSelectionObj);
+
+            // Hamle geçerli olduğu için, seçilen altındaki tüm kareleri "DOLU" olarak işaretliyoruz
+            for (int x = minX; x <= maxX; x++)
+            {
+                for (int y = minY; y <= maxY; y++)
+                {
+                    GameObject tileObj = gridManager.GetTileAt(x, y);
+                    if (tileObj != null)
+                    {
+                        tileObj.GetComponent<Tile>().isFilled = true;
+                    }
+                }
+            }
+
+            if(gameManager != null)
+            {
+                gameManager.CheckWinCondition();//Bu kısımda dolu olan kare sayısı gridi tamamladıysa yani win conditiona uyuyorsa win alıyoruz.
+            }
+        }
+        else
+        {
+            // --- HATALI HAMLE ---
+            // Kurallardan herhangi biri ihlal edildiyse animasyonu başlat
+            StartCoroutine(FlashRedAndDestroy(currentSelectionObj, currentSpriteRenderer, currentLineRenderer));
+        }
+
+        // Referansları temizle
+        currentSelectionObj = null;
+        currentSpriteRenderer = null;
+        currentLineRenderer = null;
     }
+
     Vector2Int GetCurrentTileCoords()
     {
         
@@ -90,45 +250,79 @@ void Start()
 
     }
 
-    void OnDrawGizmos()
+    void UpdateSelectionVisual()
     {
-        //Halihazırda oyun başlamadan karelere renk veriyorsa bunu durdurmak için kontrol yapmalıyız.
-        if(Application.isPlaying == false)
-        {
-            return;
-        }
-        if(hasSelectedOnce == false)
-        {
-            return;
-        }
-        // startCoords veya currentCoords negatifse (yani geçersizse) ya da isSelecting ile ilk defa başlanmadıysa koru
-        if (gridManager == null) 
-            return;
-        // Eğer koordinatlar grid dışındaysa çizimi iptal et
-        if (startCoords.x < 0 || startCoords.x >= gridManager.width || startCoords.y < 0 || startCoords.y >= gridManager.height)
-            return;
+        // Eğer sahnede seçili bir obje yoksa boşuna çalışma
+        if (currentSelectionObj == null) return;
 
-        Gizmos.color = Color.green;
-
-        //Başlangıç ve bitiş noktalarımızın tam orta noktasını hesaplıyoruz bu kısımda.
+        // 1. İÇ DOLGU (SPRITE) MERKEZİNİ VE BOYUTUNU AYARLAMA
         float centerX = (startCoords.x + currentCoords.x) / 2f;
         float centerY = (startCoords.y + currentCoords.y) / 2f;
 
-        // Burda da yeni centerımızı atıyoruz.
-        Vector3 center = new Vector3(centerX, centerY, 0);
+        // Z eksenini -0.1f yapıyoruz ki gridin önünde dursun.
+        currentSelectionObj.transform.position = new Vector3(centerX, centerY, -0.1f);
 
-
-        // Seçilen alanın kaç kare yüksekliğinde ve genişliğinde olduğunu buluyoruz bu sayede.
         float width = Mathf.Abs(startCoords.x - currentCoords.x) + 1;
         float height = Mathf.Abs(startCoords.y - currentCoords.y) + 1;
 
-        Vector3 size = new Vector3(width, height, 0.1f);
+        // Objeyi seçilen alan kadar ölçeklendiriyoruz
+        currentSelectionObj.transform.localScale = new Vector3(width, height, 1);
 
-        //Burda da işte merkezi belli olan alanı belli olan rectangularımız çizdiriyoruz.
-        Gizmos.DrawCube(center, size);
+        // 2. KENARLIKLARI (LINE RENDERER) KUTUNUN ETRAFINA ÇİZME
+        if (currentLineRenderer != null)
+        {
+            // Hücrelerin genişliği 1 birim olduğu için, kenarlar merkezden +/- 0.5f uzaktadır.
+            float minX = Mathf.Min(startCoords.x, currentCoords.x) - 0.5f;
+            float maxX = Mathf.Max(startCoords.x, currentCoords.x) + 0.5f;
+            float minY = Mathf.Min(startCoords.y, currentCoords.y) - 0.5f;
+            float maxY = Mathf.Max(startCoords.y, currentCoords.y) + 0.5f;
 
+            // Çizgi, iç dolgunun (Sprite'ın) bir tık daha önünde dursun diye -0.2f veriyoruz.
+            float zPos = -0.2f;
+
+            currentLineRenderer.SetPosition(0, new Vector3(minX, minY, zPos)); // Sol Alt
+            currentLineRenderer.SetPosition(1, new Vector3(minX, maxY, zPos)); // Sol Üst
+            currentLineRenderer.SetPosition(2, new Vector3(maxX, maxY, zPos)); // Sağ Üst
+            currentLineRenderer.SetPosition(3, new Vector3(maxX, minY, zPos)); // Sağ Alt
+            currentLineRenderer.SetPosition(4, new Vector3(minX, minY, zPos)); // Kareyi kapatmak için başa dön (Sol Alt)
+        }
+    }
+
+    // IEnumerator: Zamanlayıcı (bekleme) kullanabildiğimiz özel fonksiyon tipi
+    IEnumerator FlashRedAndDestroy(GameObject obj, SpriteRenderer sr, LineRenderer lr)
+    {
+        //1. anında kırmızı parlama
+        sr.color = new Color(1f, 0f, 0f, 0.5f);
+        lr.startColor = Color.red;
+        lr.endColor = Color.red;
+
+        //Kısa bir bekleme
+        yield return new WaitForSeconds(0.2f);
+
+        //Yavaşça Sönme Fade Out
+        float fadeDuration = 0.3f;
+        float elapsedTime = 0f;
+        
+        while (elapsedTime < fadeDuration)
+        {
+            elapsedTime += Time.deltaTime;
+
+            //Şeffaflığı (alpha) 0.5'ten 0'a doğru yavaşça düşürüyoruz
+            float alpha = Mathf.Lerp(0.5f, 0f, elapsedTime / fadeDuration);
+
+            // Yeni şeffaflığı uyguluyoruz
+            sr.color = new Color(1f, 0f, 0f, alpha);
+            lr.startColor = new Color(1f, 0f, 0f, alpha);
+            lr.endColor = new Color(1f, 0f, 0f, alpha);
+
+            //Bir sonraki kareyi belirle.
+            yield return null;
+        }
+
+        //hatalıysa yok et
+        Destroy(obj);
     }
 
 
-    
+
 }
