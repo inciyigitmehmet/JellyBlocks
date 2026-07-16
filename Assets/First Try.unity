@@ -272,6 +272,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 58d1b9d3a467abf40beb1134d0b9bea9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Selection_Manager
+  gameManager: {fileID: 594609548}
   selectionPrefab: {fileID: 341945400208659860, guid: 86b5bf360a71bad429c0b2da68e86b1c, type: 3}
   randomColors:
   - {r: 0.654902, g: 0.54509807, b: 0.98039216, a: 0}
