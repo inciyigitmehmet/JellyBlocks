@@ -63,7 +63,9 @@ public class GridManager : MonoBehaviour
     {
         // Grid'imiz artık tam (0,0) merkezinde kurulduğu için kamerayı doğrudan (0,0) noktasına konumlandırıyoruz
         Camera.main.transform.position = new Vector3(0, 0, -10);
-        Camera.main.orthographicSize = Mathf.Max(width, height) / 1.5f + 1f; // Görüş açısını grid boyutuna göre ayarlıyoruz
+        // Camera.main.orthographicSize = Mathf.Max(width, height) / 1.5f + 1f; // Görüş açısını grid boyutuna göre ayarlıyoruz. Bu eski hali
+        Camera.main.orthographicSize = 2.8f;
+        
 
         // Kamera arka plan rengini açık krem/bej yapıyoruz (referans oyundaki bej arka plan rengi)
         if (Camera.main != null)
