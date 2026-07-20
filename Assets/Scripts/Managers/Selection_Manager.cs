@@ -36,6 +36,18 @@ public class Selection_Manager : MonoBehaviour
     private List<GameObject> permanentSelections = new List<GameObject>();
     private List<GameObject> fadingSelections = new List<GameObject>(); //Sönme animasyonundaki objeler.
 
+    [Header("Effects")]
+    // Doğru hamlede objeden dökülecek küçük taş kırıkları efekti
+    public GameObject rockChipEffectPrefab;
+
+    [Header("UI Effects")]
+    // Ekranda belirip solan yazı prefab'ı
+    public GameObject floatingTextPrefab;
+    // Blok konduğunda çıkacak rastgele kelimeler
+    private string[] celebrationWords = { "Ronin!", "Samurai!", "Katana!", "Shogun!", "Zen!", "Perfect!" };
+
+    [Header("Hint System")]
+    public bool isHintModeActive = false; // İpucu modu aktif mi?
 
     void Start()
     {
@@ -82,7 +94,28 @@ public class Selection_Manager : MonoBehaviour
     {
         Vector2Int clickedCoords = GetCurrentTileCoords();
 
-        //Oyuncu Grid dışında bir yere dokunulmadığı zaman tıklandı sayar ve ona göre yerleri belirler.
+        // --- İPUCU (HINT) MODU KONTROLÜ ---
+        if (isHintModeActive)
+        {
+            if (gridManager != null && clickedCoords.x >= 0 && clickedCoords.x < gridManager.width && clickedCoords.y >= 0 && clickedCoords.y < gridManager.height)
+            {
+                GameObject tileObj = gridManager.GetTileAt(clickedCoords.x, clickedCoords.y);
+                if (tileObj != null)
+                {
+                    Tile tileComp = tileObj.GetComponent<Tile>();
+                    if (tileComp != null && tileComp.targetNumber > 0 && !tileComp.isFilled)
+                    {
+                        // Sayıya tıklandı! Çözümü otomatik uygula.
+                        ApplyKatanaHint(clickedCoords.x, clickedCoords.y);
+                    }
+                }
+            }
+            // Başarılı veya başarısız, bir yere tıklayınca hint modundan çık
+            isHintModeActive = false;
+            return;
+        }
+
+        // Tıklanılan yer grid sınırları içerisindeyse seçime başla.
         if (gridManager != null && clickedCoords.x >= 0 && clickedCoords.x < gridManager.width && clickedCoords.y >= 0 && clickedCoords.y < gridManager.height)
         {
             //Önceki sürüklemeden kalan sahipsiz obje varsa yok ediyoruz.
@@ -97,8 +130,13 @@ public class Selection_Manager : MonoBehaviour
             currentCoords = startCoords;
 
             currentSelectionObj = Instantiate(selectionPrefab);
+            // Yeni çizilen jölenin sprite renderer'ını alıyoruz.
             currentSpriteRenderer = currentSelectionObj.GetComponent<SpriteRenderer>();
+            currentSpriteRenderer.sortingOrder = 10; // KARELERİN ÖNÜNE ALIYORUZ!
+            
             currentLineRenderer = currentSelectionObj.GetComponent<LineRenderer>();
+            currentLineRenderer.sortingOrder = 11; // Çizgiyi hepsinin en üstüne alıyoruz.
+            currentLineRenderer.useWorldSpace = false; // Obje scale olduğunda çizginin de otomatik scale olması için!
 
             // Unity'nin LineRenderer materyalsiz kaldığında verdiği pembe (magenta) hatasını önlemek için materyal atıyoruz.
             // Böylece LineRenderer jöle dolgusunun koyu tonunu kendi renginde düzgünce boyayabilir.
@@ -273,6 +311,12 @@ public class Selection_Manager : MonoBehaviour
                     }
                 }
             }
+            
+            // --- ETKİLEŞİM VE ANİMASYON ---
+            // Taşın yerine oturduğu anki vurma/sıkışma animasyonunu ve toz efektini başlatıyoruz.
+            // Bu animasyon akışı bozmamak için Coroutine (arka plan işlemi) olarak bağımsız çalışır.
+            StartCoroutine(SquashAndStretchPlace(currentSelectionObj));
+
             permanentSelections.Add(currentSelectionObj);
             //Objeyi kalıcı listeye verdik, referansı sıfırlıyoruz ki tekrar kullanılmasın.
             currentSelectionObj = null;
@@ -383,14 +427,16 @@ public class Selection_Manager : MonoBehaviour
         // 2. KENARLIKLARI (LINE RENDERER) KUTUNUN ETRAFINA ÇİZME
         if (currentLineRenderer != null)
         {
-            // Kenarlıklar tüm şekli (Gölge dahil!) tam dışından saracak şekilde çizilecek
-            float minX = centerX - (visualWidth / 2f);
-            float maxX = centerX + (visualWidth / 2f);
-            float maxY = visualCenterY + (visualHeight / 2f);
-            // Alt kenarlık gölgenin bittiği yere kadar iniyor! Bu sayede içeriden çizgi geçmiyor.
-            float minY = visualCenterY - (visualHeight / 2f) - shadowThickness;
+            // useWorldSpace = false olduğu için koordinatlar Transform'un merkezine (0,0,0) göre belirlenmeli.
+            // Transform scale edildiği için -0.5 ile 0.5 arası tam köşelere denk gelir.
+            float minX = -0.5f;
+            float maxX = 0.5f;
+            float maxY = 0.5f;
+            
+            // Alt kenarlık gölgenin bittiği yere kadar iniyor! 
+            // Local space'te olduğumuz için gölge kalınlığını gerçek dünya boyutuna (visualHeight) bölerek küçültüyoruz.
+            float minY = -0.5f - (shadowThickness / visualHeight);
 
-            // Çizgi, iç dolgunun (Sprite'ın) bir tık daha önünde dursun diye -0.2f veriyoruz.
             float zPos = -0.2f;
 
             currentLineRenderer.SetPosition(0, new Vector3(minX, minY, zPos)); // Sol Alt
@@ -495,5 +541,262 @@ public class Selection_Manager : MonoBehaviour
         }
 
         isSelecting = false;
+    }
+
+    // Taş blok (dikdörtgen) yerine oturduğunda çalışacak Squash & Stretch animasyonu ve Particle efekti
+    IEnumerator SquashAndStretchPlace(GameObject obj)
+    {
+        // Güvenlik kontrolü: Obje yoksa (veya silinmişse) coroutine'i durdur
+        if (obj == null) yield break;
+
+        // --- KATANA KESİK (SLASH) EFEKTİ TETİKLEME ---
+        // Taştan parçacık dökülmesi (Particle) yerine çok daha asil ve temiz bir "Kılıç Kesiği" atıyoruz.
+        GameObject katanaSlashObj = new GameObject("KatanaSlash");
+        katanaSlashObj.transform.position = obj.transform.position;
+        KatanaSlash katanaSlash = katanaSlashObj.AddComponent<KatanaSlash>();
+        
+        // Bloğun gerçek boyutunu veriyoruz ki kılıç izi bloğu tamamen boydan boya kessin
+        Vector2 blockSize = new Vector2(obj.transform.localScale.x, obj.transform.localScale.y);
+        katanaSlash.PlaySlash(blockSize);
+
+        // --- FLOATING TEXT (KUTLAMA YAZISI) ---
+        if (floatingTextPrefab != null)
+        {
+            // Yazıyı bloğun ortasından veya çok az üzerinden doğuruyoruz ki çok yüksekten uçmasın
+            Vector3 textSpawnPos = obj.transform.position + new Vector3(0, obj.transform.localScale.y / 4f, -2f);
+            GameObject floatTextObj = Instantiate(floatingTextPrefab, textSpawnPos, Quaternion.identity);
+            
+            FloatingText floatingText = floatTextObj.GetComponent<FloatingText>();
+            if (floatingText != null)
+            {
+                // Rastgele bir kutlama kelimesi seç
+                string randomWord = celebrationWords[Random.Range(0, celebrationWords.Length)];
+                // Bloğun kendi rengini al
+                Color blockColor = obj.GetComponent<SpriteRenderer>().color;
+                // Şeffaflığını tam (1) yap ki yazı belirgin olsun
+                blockColor.a = 1f; 
+                
+                floatingText.Initialize(randomWord, blockColor);
+            }
+        }
+
+        // --- SQUASH & STRETCH ANİMASYONU ---
+        Vector3 originalScale = obj.transform.localScale;
+        
+        // Sıkışma oranları: X ekseninde yayvanlaşacak (1.15x), Y ekseninde basılacak (0.85x)
+        Vector3 squashScale = new Vector3(originalScale.x * 1.15f, originalScale.y * 0.85f, originalScale.z);
+
+        // 1. AŞAMA: TAŞIN YERE ÇARPIP SIKIŞMA ANI (0.12 saniye)
+        // Yere hızla oturan ağır bir taşın enerjiyi dışa vurması hissi
+        float squashDuration = 0.12f;
+        float elapsedTime = 0f;
+
+        while (elapsedTime < squashDuration)
+        {
+            if (obj == null) yield break; // Obje silinirse güvenlice çık
+
+            elapsedTime += Time.deltaTime;
+            // Orijinal boyuttan basılmış boyuta doğru yumuşak (Lerp) geçiş
+            obj.transform.localScale = Vector3.Lerp(originalScale, squashScale, elapsedTime / squashDuration);
+            yield return null; // Bir sonraki frame'e geç
+        }
+
+        // 2. AŞAMA: GERİ SEKİP NORMALE DÖNME - OTURMA HİSSİ (0.12 saniye)
+        // Sıkışan taşın kinetik enerjisini atıp kendi katı formuna geri dönmesi
+        float stretchDuration = 0.12f;
+        elapsedTime = 0f;
+
+        while (elapsedTime < stretchDuration)
+        {
+            if (obj == null) yield break; // Obje silinirse güvenlice çık
+
+            elapsedTime += Time.deltaTime;
+            // Basılmış boyuttan tekrar orijinal (tasarlanan) boyutuna geri dönüş
+            obj.transform.localScale = Vector3.Lerp(squashScale, originalScale, elapsedTime / stretchDuration);
+            yield return null;
+        }
+
+        // Animasyon bitiminde tam olarak orijinal boyutta ve pozisyonda kalmasını garantiye al
+        if (obj != null)
+        {
+            obj.transform.localScale = originalScale;
+        }
+    }
+
+    // Bölüm bittiğinde tüm kalıcı taşlara katana darbesi yemiş gibi bir titreme (Tremble) efekti verir
+    public void TriggerWinTremble()
+    {
+        foreach (GameObject obj in permanentSelections)
+        {
+            if (obj != null)
+            {
+                StartCoroutine(TrembleRoutine(obj));
+            }
+        }
+    }
+
+    private IEnumerator TrembleRoutine(GameObject obj)
+    {
+        Vector3 startPos = obj.transform.localPosition;
+        float duration = 0.4f; // Sakin bir geri dönüş süresi
+        float elapsed = 0f;
+
+        // Orijinal rengi kaydet (Parlama efekti için)
+        SpriteRenderer sr = obj.GetComponent<SpriteRenderer>();
+        Color originalColor = Color.white;
+        if (sr != null) originalColor = sr.color;
+
+        // Kılıç dalgası (ripple) için ufak gecikme
+        yield return new WaitForSeconds(Random.Range(0f, 0.15f));
+
+        if (obj == null) yield break;
+
+        // 1. Kılıcın vuruş açısı (Rastgele bir yön)
+        float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
+        // Kılıcın darbesiyle taşın aniden kaydığı nokta (Barbarca titremek yerine tek bir keskin darbe)
+        Vector3 strikeOffset = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0) * 0.12f;
+        
+        // Taş darbeyi yediği an milisaniyede sarsıntıyla kayar
+        obj.transform.localPosition = startPos + strikeOffset;
+
+        // 2. Dingin bir şekilde (Ease-out) yerine geri kayması
+        while (elapsed < duration)
+        {
+            if (obj == null) yield break;
+            
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            float smoothT = 1f - Mathf.Pow(1f - t, 3f); // Cubic ease-out (hızlı başlar, yumuşak biter)
+            
+            obj.transform.localPosition = Vector3.Lerp(startPos + strikeOffset, startPos, smoothT);
+
+            // Kesik anında tam beyaz/şeffaf olur, sonra yumuşakça normale döner
+            if (sr != null)
+            {
+                float flashAmount = 1f - smoothT; 
+                Color flashColor = Color.Lerp(originalColor, Color.white, flashAmount * 0.6f);
+                flashColor.a = Mathf.Lerp(originalColor.a, 0.4f, flashAmount); 
+                
+                sr.color = flashColor;
+            }
+            
+            yield return null;
+        }
+
+        // Efekt bitince milimetrik olarak eski yerine oturt ve orijinal rengi geri ver
+        if (obj != null)
+        {
+            obj.transform.localPosition = startPos;
+            if (sr != null) sr.color = originalColor;
+        }
+    }
+
+    // --- İPUCU (HINT) SİSTEMİ METOTLARI ---
+
+    // UI'daki Katana butonuna basınca çağrılır
+    public void ToggleHintMode()
+    {
+        isHintModeActive = !isHintModeActive;
+        if (isHintModeActive)
+        {
+            Debug.Log("Katana Hint Modu Aktif! Ekranda çözemediğiniz bir sayıya tıklayın.");
+        }
+        else
+        {
+            Debug.Log("Katana Hint Modu İptal Edildi.");
+        }
+    }
+
+    // Sayıya tıklandığında çözümü otomatik olarak yerleştirir
+    private void ApplyKatanaHint(int tx, int ty)
+    {
+        LevelManager levelManager = FindAnyObjectByType<LevelManager>();
+        if (levelManager == null || levelManager.CurrentSolution == null) return;
+
+        Shikaku_Solver.SolutionRect correctRect = new Shikaku_Solver.SolutionRect { w = 0 };
+        
+        // Çözüm listesinden tıklanan sayının ait olduğu dikdörtgeni bul
+        foreach (var rect in levelManager.CurrentSolution)
+        {
+            if (tx >= rect.x && tx < rect.x + rect.w && ty >= rect.y && ty < rect.y + rect.h)
+            {
+                correctRect = rect;
+                break;
+            }
+        }
+
+        // Çözüm bulunduysa otomatik çiz
+        if (correctRect.w > 0)
+        {
+            // Orijinal çizim mantığını taklit ediyoruz
+            startCoords = new Vector2Int(correctRect.x, correctRect.y);
+            currentCoords = new Vector2Int(correctRect.x + correctRect.w - 1, correctRect.y + correctRect.h - 1);
+            
+            currentSelectionObj = Instantiate(selectionPrefab);
+            currentSpriteRenderer = currentSelectionObj.GetComponent<SpriteRenderer>();
+            currentLineRenderer = currentSelectionObj.GetComponent<LineRenderer>();
+
+            Color pickedColor = Color.white;
+            if (randomColors.Length > 0)
+                pickedColor = randomColors[Random.Range(0, randomColors.Length)];
+
+            if (currentSpriteRenderer != null)
+            {
+                Color fillColor = pickedColor;
+                fillColor.a = 1f; // Tam opak
+                currentSpriteRenderer.color = fillColor;
+                currentSpriteRenderer.sortingOrder = 10;
+            }
+
+            if (currentLineRenderer != null)
+            {
+                Color lineColor = pickedColor * 0.85f;
+                lineColor.a = 1f;
+                currentLineRenderer.startColor = lineColor;
+                currentLineRenderer.endColor = lineColor;
+                currentLineRenderer.positionCount = 5;
+                currentLineRenderer.startWidth = 0.04f;
+                currentLineRenderer.endWidth = 0.04f;
+                currentLineRenderer.useWorldSpace = false;
+                
+                GameObject shadowObj = new GameObject("JellyShadow");
+                shadowObj.transform.SetParent(currentSelectionObj.transform);
+                SpriteRenderer shadowSr = shadowObj.AddComponent<SpriteRenderer>();
+                shadowSr.sprite = currentSpriteRenderer.sprite;
+                shadowSr.sortingOrder = currentSpriteRenderer.sortingOrder - 1;
+                shadowSr.color = lineColor;
+            }
+
+            UpdateSelectionVisual();
+
+            BoxCollider2D bc = currentSelectionObj.GetComponent<BoxCollider2D>();
+            if (bc != null) bc.enabled = true;
+
+            permanentSelections.Add(currentSelectionObj);
+            
+            // Hücreleri dolu olarak işaretle
+            for (int x = correctRect.x; x < correctRect.x + correctRect.w; x++)
+            {
+                for (int y = correctRect.y; y < correctRect.y + correctRect.h; y++)
+                {
+                    GameObject tObj = gridManager.GetTileAt(x, y);
+                    if (tObj != null)
+                    {
+                        Tile tComp = tObj.GetComponent<Tile>();
+                        tComp.isFilled = true;
+                    }
+                }
+            }
+
+            // Kılıç efekti ve sarsıntılar için Squash rutinini başlat
+            StartCoroutine(SquashAndStretchPlace(currentSelectionObj));
+
+            // Kazanma durumu kontrolü
+            GameManager gameManager = FindAnyObjectByType<GameManager>();
+            if (gameManager != null)
+            {
+                gameManager.CheckWinCondition();
+            }
+        }
     }
 }

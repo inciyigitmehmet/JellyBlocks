@@ -7,6 +7,9 @@ public class GameManager : MonoBehaviour
 
     //LevelManager referansı.
     [SerializeField] private LevelManager levelManager;
+    
+    //SelectionManager referansı (Kazanma efektleri için)
+    private Selection_Manager selectionManager;
 
     //Seviyenin kazanılıp kazanılmadığını tutan kilit değişkeni.
     private bool isLevelWon = false;
@@ -27,6 +30,8 @@ public class GameManager : MonoBehaviour
         {
             levelManager = FindAnyObjectByType<LevelManager>();
         }
+
+        selectionManager = FindAnyObjectByType<Selection_Manager>();
     }
 
     //Kazanıp kazanmadığımızı belli eden fonksiyon.
@@ -88,18 +93,53 @@ public class GameManager : MonoBehaviour
         isLevelWon = false;
     }
 
+    [Header("UI Effects")]
+    public GameObject zenCompleteScreenPrefab;
+
     //Kazanılan an sonrası sonraki seviyeye geçişi geciktiren coroutine.
     private System.Collections.IEnumerator WinSequence()
     {
         //Her şeyin bittiği an kazanılan an. Tahta tamamen doldu.
-        Debug.Log("Deliciousss!!!");
+        Debug.Log("Zen Complete!");
+
+        // 1. ADIM: Tüm blokları sars (Kılıç titreşimi - Tremble efekti)
+        if (selectionManager != null)
+        {
+            selectionManager.TriggerWinTremble();
+        }
         
-        yield return new WaitForSeconds(1.5f);
+        // Titreme efektinin bitmesini bekle (yaklaşık 0.4 saniye)
+        yield return new WaitForSeconds(0.4f);
+        
+        // 2. ADIM: Zen Bölüm Sonu Ekranını Başlat
+        if (zenCompleteScreenPrefab != null)
+        {
+            // Geçiş ekranını oluştur
+            GameObject transitionObj = Instantiate(zenCompleteScreenPrefab);
+            ZenLevelCompleteScreen transition = transitionObj.GetComponent<ZenLevelCompleteScreen>();
+            
+            if (transition != null)
+            {
+                // Ekran kapanırken diğer bölümü yükle
+                transition.ShowScreen(() => 
+                {
+                    if (levelManager != null)
+                    {
+                        levelManager.LoadNextLevel();
+                    }
+                });
+            }
+        }
+        else
+        {
+            // Eğer prefab atanmamışsa hata almamak için klasik bekleme
+            yield return new WaitForSeconds(1.5f);
+            if (levelManager != null)
+            {
+                levelManager.LoadNextLevel();
+            }
+        }
         
         winCoroutine = null;
-        if (levelManager != null)
-        {
-            levelManager.LoadNextLevel();
-        }
     }
 }
