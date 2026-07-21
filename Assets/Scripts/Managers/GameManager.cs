@@ -91,6 +91,22 @@ public class GameManager : MonoBehaviour
             winCoroutine = null;
         }
         isLevelWon = false;
+        
+        // Yeni bölüme geçildiğinde canları sıfırla (İptal edildi)
+        // currentLives = maxLives;
+        // if (LifeUIManager.Instance != null)
+        // {
+        //     LifeUIManager.Instance.UpdateLifeUI(currentLives, maxLives);
+        // }
+    }
+
+    [Header("Life System (ASKIYA ALINDI)")]
+    public int maxLives = 5;
+    public int currentLives = 5;
+
+    public void LoseLife()
+    {
+        // Can sistemi şimdilik askıya alındı.
     }
 
     [Header("UI Effects")]

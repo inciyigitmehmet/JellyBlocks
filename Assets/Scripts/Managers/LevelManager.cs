@@ -82,6 +82,11 @@ public class LevelManager : MonoBehaviour
             Debug.Log("Tüm seviyeler bitti!");
     }
 
+    public void RestartLevel()
+    {
+        LoadLevelByIndex(currentIndex);
+    }
+
     public void LoadPreviousLevel()
     {
         if (currentIndex - 1 >= 0)

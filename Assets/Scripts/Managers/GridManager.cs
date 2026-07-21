@@ -61,16 +61,29 @@ public class GridManager : MonoBehaviour
 
     void CenterCamera()
     {
-        // Grid'imiz artık tam (0,0) merkezinde kurulduğu için kamerayı doğrudan (0,0) noktasına konumlandırıyoruz
-        Camera.main.transform.position = new Vector3(0, 0, -10);
-        // Camera.main.orthographicSize = Mathf.Max(width, height) / 1.5f + 1f; // Görüş açısını grid boyutuna göre ayarlıyoruz. Bu eski hali
-        Camera.main.orthographicSize = 2.8f;
-        
+        // Grid'imiz tam (0,0) merkezinde kurulduğu için kamerayı ortalıyoruz.
+        // Y ekseninde -1.5f yaparak kamerayı biraz "aşağı" kaydırıyoruz ki, grid yukarı doğru kaysın
+        // ve alt tarafta Hint butonu için daha fazla boşluk kalsın!
+        Camera.main.transform.position = new Vector3(0, -1.0f, -10);
 
-        // Kamera arka plan rengini açık krem/bej yapıyoruz (referans oyundaki bej arka plan rengi)
+        // Dinamik Kamera Yakınlaştırma/Uzaklaştırma (Zoom) Sistemi
+        // Telefon ekranlarında UI için üstte ve altta pay bırakmamız gerek.
+        float marginY = 2.5f; // Üstte ve altta bırakılacak boşluk miktarı
+        float marginX = 1.0f; // Sağda ve solda bırakılacak boşluk miktarı
+
+        float screenAspect = (float)Screen.width / Screen.height;
+        
+        // Grid'in dikeyde veya yatayda ekrana sığması için gereken minimum kamera boyutlarını hesaplıyoruz
+        float requiredSizeY = (height / 2f) + marginY;
+        float requiredSizeX = ((width / 2f) + marginX) / screenAspect;
+
+        // Hangisi daha büyükse onu alıyoruz ki grid asla ekranın dışına taşmasın!
+        Camera.main.orthographicSize = Mathf.Max(requiredSizeY, requiredSizeX);
+        
+        // Kamera arka plan rengini biraz daha koyu bej/krem yapıyoruz
         if (Camera.main != null)
         {
-            Camera.main.backgroundColor = new Color(0.97f, 0.96f, 0.94f, 1f); // #F7F5F0 civarı bej
+            Camera.main.backgroundColor = new Color(0.91f, 0.90f, 0.88f, 1f); 
             Camera.main.clearFlags = CameraClearFlags.SolidColor;
         }
     }

@@ -1,41 +1,57 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using TMPro;
 using System.Collections;
 
-// Bölüm sonu Atasözlü ve Daktilo Efektli Zen Geçiş Ekranı
 public class ZenLevelCompleteScreen : MonoBehaviour
 {
     private string[] titles = { 
-        "Immaculate!", 
-        "Flawless!", 
-        "On Fire!", 
-        "Zen Mastery!", 
-        "Lightning Fast!", 
-        "Perfect Slice!" 
+        "Immaculate!", "Flawless!", "Perfect!", "Zen Mastery!", 
+        "Brilliant!", "Outstanding!", "Exceptional!", "Spotless!", "Pure Genius!" 
     };
-    
     private string[] proverbs = {
-        "Fall seven times, stand up eight.",
-        "The bamboo that bends is stronger than the oak that resists.",
-        "One kind word can warm three winter months.",
-        "Continuous improvement is better than delayed perfection.",
-        "Even a journey of a thousand miles begins with a single step."
+        "You trusted your logic and it paid off perfectly.",
+        "A clear mind leads to flawless execution.",
+        "Patience and focus are the keys to victory.",
+        "Every puzzle solved is a step towards enlightenment.",
+        "Precision in thought brings perfection in action.",
+        "The quiet mind absorbs all challenges effortlessly.",
+        "Order emerges when the mind is at peace.",
+        "True mastery is found in the simplest moves."
     };
+
+    private System.Action onCompleteCallback;
+    private bool isTransitioning = false;
+    private Image bgImg;
+    private CanvasGroup canvasGroup;
 
     public void ShowScreen(System.Action onComplete)
     {
-        StartCoroutine(ScreenRoutine(onComplete));
+        onCompleteCallback = onComplete;
+        StartCoroutine(ScreenRoutine());
     }
 
-    private IEnumerator ScreenRoutine(System.Action onComplete)
+    private IEnumerator ScreenRoutine()
     {
         // 1. KANVAS VE ARKA PLAN
         Canvas canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 100;
 
-        gameObject.AddComponent<CanvasScaler>();
+        gameObject.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        gameObject.AddComponent<GraphicRaycaster>(); // Buton tıklaması için gerekli!
+        
+        // EventSystem yoksa ekle (Buton tıklaması için zorunlu)
+        if (FindAnyObjectByType<EventSystem>() == null)
+        {
+            GameObject eventSystem = new GameObject("EventSystem");
+            eventSystem.AddComponent<EventSystem>();
+            eventSystem.AddComponent<StandaloneInputModule>();
+        }
+
+        canvasGroup = gameObject.AddComponent<CanvasGroup>();
+        canvasGroup.alpha = 0f;
 
         GameObject bgObj = new GameObject("Background");
         bgObj.transform.SetParent(transform, false);
@@ -43,86 +59,107 @@ public class ZenLevelCompleteScreen : MonoBehaviour
         bgRect.anchorMin = Vector2.zero;
         bgRect.anchorMax = Vector2.one;
         bgRect.sizeDelta = Vector2.zero;
-        Image bgImg = bgObj.AddComponent<Image>();
-        bgImg.color = new Color(0.96f, 0.95f, 0.90f, 0f); // Krem, başlangıçta saydam
+        bgImg = bgObj.AddComponent<Image>();
+        bgImg.color = new Color(0.96f, 0.95f, 0.90f, 0.85f); // Arkadaki grid hafifçe görünsün
 
-        // Arka planı yumuşakça karart (Fade in)
-        float elapsed = 0;
-        while(elapsed < 0.5f)
-        {
-            elapsed += Time.deltaTime;
-            bgImg.color = new Color(0.96f, 0.95f, 0.90f, Mathf.Lerp(0f, 0.95f, elapsed/0.5f));
-            yield return null;
-        }
-
-        // 2. BAŞLIK (DAKTİLO EFEKTİ)
+        // 2. BAŞLIK
         GameObject titleObj = new GameObject("Title");
         titleObj.transform.SetParent(transform, false);
         RectTransform titleRect = titleObj.AddComponent<RectTransform>();
-        // Kırmızı yazıyı biraz daha yukarı aldık
-        titleRect.anchorMin = new Vector2(0f, 0.6f);
-        titleRect.anchorMax = new Vector2(1f, 0.75f);
+        titleRect.anchorMin = new Vector2(0.05f, 0.6f); // Biraz daha geniş ve aşağıda
+        titleRect.anchorMax = new Vector2(0.95f, 0.85f);
         titleRect.sizeDelta = Vector2.zero;
         
         TextMeshProUGUI titleText = titleObj.AddComponent<TextMeshProUGUI>();
-        string selectedTitle = titles[Random.Range(0, titles.Length)];
-        titleText.text = "";
-        titleText.fontSize = 110;
+        titleText.text = titles[Random.Range(0, titles.Length)];
+        titleText.fontSize = 130;
+        titleText.enableAutoSizing = true; // Taştığında otomatik küçült
+        titleText.fontSizeMin = 60;
+        titleText.fontSizeMax = 150;
         titleText.fontStyle = FontStyles.Italic | FontStyles.Bold;
-        titleText.alignment = TextAlignmentOptions.Bottom; // Alta yaslı ki alttaki yazıyla grup dursun
-        titleText.color = new Color(0.9f, 0.3f, 0.3f, 1f); // Mercan / Kırmızı
+        titleText.alignment = TextAlignmentOptions.Center;
+        titleText.color = new Color(0.9f, 0.3f, 0.3f, 1f); // Kırmızı
+        
+        // Başlık Gölgesi
+        Shadow titleShadow = titleObj.AddComponent<Shadow>();
+        titleShadow.effectColor = new Color(0, 0, 0, 0.2f);
+        titleShadow.effectDistance = new Vector2(3, -3);
 
-        // Harf harf yazma (Typewriter effect)
-        WaitForSeconds letterWait = new WaitForSeconds(0.05f); // Her harf arası 50 milisaniye
-        for(int i = 0; i <= selectedTitle.Length; i++)
-        {
-            titleText.text = selectedTitle.Substring(0, i);
-            yield return letterWait;
-        }
-
-        yield return new WaitForSeconds(0.2f); // Atasözünden önce ufak bir dramatik nefes
-
-        // 3. ATASÖZÜ (YAVAŞÇA BELİRME / FADE IN)
+        // 3. ALT YAZI (ATASÖZÜ)
         GameObject provObj = new GameObject("Proverb");
         provObj.transform.SetParent(transform, false);
         RectTransform provRect = provObj.AddComponent<RectTransform>();
-        // Atasözünü biraz daha aşağı alarak araya boşluk (nefes) ekledik
-        provRect.anchorMin = new Vector2(0.1f, 0.35f);
-        provRect.anchorMax = new Vector2(0.9f, 0.5f);
+        provRect.anchorMin = new Vector2(0.05f, 0.35f); // Daha geniş alan
+        provRect.anchorMax = new Vector2(0.95f, 0.55f);
         provRect.sizeDelta = Vector2.zero;
 
         TextMeshProUGUI provText = provObj.AddComponent<TextMeshProUGUI>();
         provText.text = proverbs[Random.Range(0, proverbs.Length)];
-        provText.fontSize = 50;
-        provText.alignment = TextAlignmentOptions.Top; // Üste yaslı ki başlığa yakın dursun
-        provText.color = new Color(0.2f, 0.2f, 0.2f, 0f); // Başlangıçta saydam
+        provText.fontSize = 55;
+        provText.enableAutoSizing = true; // Taştığında otomatik küçült
+        provText.fontSizeMin = 30;
+        provText.fontSizeMax = 70;
+        provText.alignment = TextAlignmentOptions.Center;
+        provText.color = new Color(0.2f, 0.2f, 0.2f, 1f);
 
-        elapsed = 0;
-        while(elapsed < 0.6f)
-        {
-            elapsed += Time.deltaTime;
-            provText.color = new Color(0.2f, 0.2f, 0.2f, Mathf.Lerp(0f, 1f, elapsed/0.6f));
-            yield return null;
-        }
-
-        // Ekranı okuması için huzurlu bir bekleyiş (2.5 saniye)
-        yield return new WaitForSeconds(2.5f);
-
-        // 4. EKRANI YAVAŞÇA SİL VE DİĞER BÖLÜMÜ YÜKLE
-        // Ekran silinmeye başlamadan hemen önce arkaplanda yeni bölümü yüklüyoruz ki geçiş pürüzsüz olsun
-        if (onComplete != null) onComplete.Invoke();
-
-        elapsed = 0;
+        // Ekranı yavaşça belirginleştir
+        float elapsed = 0;
         while(elapsed < 0.5f)
         {
             elapsed += Time.deltaTime;
-            float alpha = Mathf.Lerp(1f, 0f, elapsed/0.5f);
-            bgImg.color = new Color(0.96f, 0.95f, 0.90f, alpha * 0.95f);
-            titleText.color = new Color(0.9f, 0.3f, 0.3f, alpha);
-            provText.color = new Color(0.2f, 0.2f, 0.2f, alpha);
+            canvasGroup.alpha = Mathf.Lerp(0f, 1f, elapsed/0.5f);
             yield return null;
         }
 
-        Destroy(gameObject); // Kendimizi yok edelim
+        // Yazıyı okuması için bekleyiş
+        yield return new WaitForSeconds(2.0f);
+
+        // Otomatik olarak kılıç kesiği ile yeni bölüme geçiş yap
+        StartCoroutine(TransitionRoutine());
+    }
+
+    private IEnumerator TransitionRoutine()
+    {
+        // UI Katana Kesiği Efekti
+        GameObject slashObj = new GameObject("UIKatanaSlash");
+        slashObj.transform.SetParent(transform, false);
+        RectTransform rt = slashObj.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(0, 30); // Kalın, devasa bir kesik
+        rt.localRotation = Quaternion.Euler(0, 0, Random.Range(15f, 45f) * (Random.value > 0.5f ? 1 : -1));
+        
+        Image img = slashObj.AddComponent<Image>();
+        img.color = Color.white; // Bembeyaz parlayan bir kılıç izi
+
+        // 1. Şimşek gibi uzama
+        float duration = 0.1f;
+        float elapsed = 0f;
+        while(elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            rt.sizeDelta = new Vector2(Mathf.Lerp(0, 4000, elapsed/duration), 30);
+            yield return null;
+        }
+
+        // Kesik atılır atılmaz arka plan yüklemesi başlasın
+        if (onCompleteCallback != null) onCompleteCallback.Invoke();
+
+        // 2. Solarla kaybolma ve tüm ekranın kararması
+        duration = 0.3f;
+        elapsed = 0f;
+        while(elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            img.color = new Color(1, 1, 1, Mathf.Lerp(1, 0, t));
+            rt.sizeDelta = new Vector2(4000, Mathf.Lerp(30, 0, t));
+            
+            // Ekran da kılıç darbesiyle yavaşça kararıp silinsin
+            canvasGroup.alpha = Mathf.Lerp(1f, 0f, t);
+            yield return null;
+        }
+
+        Destroy(gameObject);
     }
 }

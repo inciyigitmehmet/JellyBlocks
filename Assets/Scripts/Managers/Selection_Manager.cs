@@ -49,8 +49,29 @@ public class Selection_Manager : MonoBehaviour
     [Header("Hint System")]
     public bool isHintModeActive = false; // İpucu modu aktif mi?
 
+    private Color ParseHexColor(string hex)
+    {
+        Color color;
+        if (ColorUtility.TryParseHtmlString(hex, out color))
+        {
+            return color;
+        }
+        return Color.white;
+    }
+
     void Start()
     {
+        // 2. Resimdeki o tatlı telefon oyunu pastel renkleri (Hardcoded)
+        randomColors = new Color[] {
+            ParseHexColor("#F2777A"), // Kırmızı/Somon
+            ParseHexColor("#7C95F2"), // Mavi
+            ParseHexColor("#69C971"), // Yeşil
+            ParseHexColor("#F79446"), // Turuncu
+            ParseHexColor("#F2C861"), // Sarı
+            ParseHexColor("#6DC9C3"), // Turkuaz
+            ParseHexColor("#AC90E4")  // Mor
+        };
+
         //Referans oyundaki gibi tamamlanan jöleleri tamamen opak yapıyoruz.
         lockedAlpha = 1f;
 
@@ -132,10 +153,12 @@ public class Selection_Manager : MonoBehaviour
             currentSelectionObj = Instantiate(selectionPrefab);
             // Yeni çizilen jölenin sprite renderer'ını alıyoruz.
             currentSpriteRenderer = currentSelectionObj.GetComponent<SpriteRenderer>();
-            currentSpriteRenderer.sortingOrder = 10; // KARELERİN ÖNÜNE ALIYORUZ!
+            
+            // SÜRÜKLERKEN DİĞER BLOKLARIN ÜSTÜNDE GÖRÜNMESİ İÇİN (20 YAPTIK)
+            currentSpriteRenderer.sortingOrder = 20; 
             
             currentLineRenderer = currentSelectionObj.GetComponent<LineRenderer>();
-            currentLineRenderer.sortingOrder = 11; // Çizgiyi hepsinin en üstüne alıyoruz.
+            currentLineRenderer.sortingOrder = 21; // Çizgiyi en üstüne alıyoruz.
             currentLineRenderer.useWorldSpace = false; // Obje scale olduğunda çizginin de otomatik scale olması için!
 
             // Unity'nin LineRenderer materyalsiz kaldığında verdiği pembe (magenta) hatasını önlemek için materyal atıyoruz.
@@ -181,8 +204,12 @@ public class Selection_Manager : MonoBehaviour
                 shadowObj.transform.SetParent(currentSelectionObj.transform);
                 SpriteRenderer shadowSr = shadowObj.AddComponent<SpriteRenderer>();
                 shadowSr.sprite = currentSpriteRenderer.sprite;
-                shadowSr.sortingOrder = currentSpriteRenderer.sortingOrder - 1; // Arkada kalması için
+                shadowSr.sortingOrder = 19; // Sürüklerken gölge de üstte olsun
                 
+                // Sürüklerken gölgeyi (ikinci katmanı) tamamen Kapatıyoruz!
+                // Böylece şeffaflıklar üst üste binip çirkin bir görüntü oluşturmaz.
+                shadowSr.enabled = false; 
+
                 // Gölgenin rengini kenarlık ile aynı ve saydamlığını dragAlpha yapıyoruz
                 Color sColor = lineColor;
                 sColor.a = dragAlpha;
@@ -198,6 +225,71 @@ public class Selection_Manager : MonoBehaviour
         }
     }
 
+    bool HasOverlap(Vector2Int start, Vector2Int end)
+    {
+        int minX = Mathf.Min(start.x, end.x);
+        int maxX = Mathf.Max(start.x, end.x);
+        int minY = Mathf.Min(start.y, end.y);
+        int maxY = Mathf.Max(start.y, end.y);
+
+        for (int x = minX; x <= maxX; x++)
+        {
+            for (int y = minY; y <= maxY; y++)
+            {
+                GameObject tileObj = gridManager.GetTileAt(x, y);
+                if (tileObj != null)
+                {
+                    Tile tileComponent = tileObj.GetComponent<Tile>();
+                    if (tileComponent != null && tileComponent.isFilled)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    Vector2Int GetMaxValidCoords(Vector2Int start, Vector2Int target)
+    {
+        int stepX = target.x >= start.x ? 1 : -1;
+        int stepY = target.y >= start.y ? 1 : -1;
+        
+        int bestArea = -1;
+        Vector2Int bestCoord = start;
+        
+        for (int x = start.x; x != target.x + stepX; x += stepX)
+        {
+            for (int y = start.y; y != target.y + stepY; y += stepY)
+            {
+                Vector2Int testCoord = new Vector2Int(x, y);
+                if (!HasOverlap(start, testCoord))
+                {
+                    int area = (Mathf.Abs(x - start.x) + 1) * (Mathf.Abs(y - start.y) + 1);
+                    if (area > bestArea)
+                    {
+                        bestArea = area;
+                        bestCoord = testCoord;
+                    }
+                    else if (area == bestArea)
+                    {
+                        float distOld = Vector2Int.Distance(bestCoord, target);
+                        float distNew = Vector2Int.Distance(testCoord, target);
+                        if (distNew < distOld)
+                        {
+                            bestCoord = testCoord;
+                        }
+                    }
+                }
+                else
+                {
+                    break; // Bu (x) sütununda daha fazla (y) yönüne gidemeyiz, tıkandık.
+                }
+            }
+        }
+        return bestCoord;
+    }
+
     // Elini basılı tutup sürüklediğin sürece (Sadece geçerli bir seçim başladıysa çalışır)
     void HandleTouchDrag()
     {
@@ -205,7 +297,8 @@ public class Selection_Manager : MonoBehaviour
         Vector2Int hooverCoords = GetCurrentTileCoords();
         if (gridManager != null && hooverCoords.x >= 0 && hooverCoords.x < gridManager.width && hooverCoords.y >= 0 && hooverCoords.y < gridManager.height)
         {
-            currentCoords = hooverCoords;
+            // ENGEL KONTROLÜ: Dolu hücrelerin üzerinden geçilmesini engelle
+            currentCoords = GetMaxValidCoords(startCoords, hooverCoords);
         }
 
         UpdateSelectionVisual();
@@ -214,7 +307,8 @@ public class Selection_Manager : MonoBehaviour
     //ekrana dokunuyor mu dokunmuyorsa false yap.
     void HandleTouchUp()
     {
-        if (gridManager == null) return;
+        if (gridManager == null || !isSelecting) return;
+        
         // Sürükleme işlemini bitiriyoruz
         isSelecting = false;
 
@@ -292,29 +386,41 @@ public class Selection_Manager : MonoBehaviour
         if (isMoveValid)
         {
             Debug.Log($"[DEBUG] BAŞARILI HAMLE - Frame: {Time.frameCount}, Obje: {currentSelectionObj?.name}");
+            
+            // --- SES EFEKTİ (BAŞARILI) ---
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlaySlashSound();
+            }
+
             // --- BAŞARILI HAMLE ---
             if (currentSpriteRenderer != null)
             {
                 Color finalColor = currentSpriteRenderer.color;
                 finalColor.a = lockedAlpha;
                 currentSpriteRenderer.color = finalColor;
+                
+                // KALICI OLDUĞUNDA SEVİYESİNİ DÜŞÜRÜYORUZ
+                currentSpriteRenderer.sortingOrder = 10;
+            }
 
-                Transform shadowTransform = currentSelectionObj.transform.Find("JellyShadow");
-                if (shadowTransform != null)
+            Transform shadowTransform = currentSelectionObj.transform.Find("JellyShadow");
+            if (shadowTransform != null)
+            {
+                SpriteRenderer shadowSr = shadowTransform.GetComponent<SpriteRenderer>();
+                if (shadowSr != null)
                 {
-                    SpriteRenderer shadowSr = shadowTransform.GetComponent<SpriteRenderer>();
-                    if (shadowSr != null)
-                    {
-                        Color sColor = shadowSr.color;
-                        sColor.a = lockedAlpha;
-                        shadowSr.color = sColor;
-                    }
+                    shadowSr.enabled = true; // Bırakıldığında gölgeyi aktif et!
+                    Color finalSColor = shadowSr.color;
+                    finalSColor.a = lockedAlpha;
+                    shadowSr.color = finalSColor;
+                    
+                    shadowSr.sortingOrder = 9;
                 }
             }
             
             // --- ETKİLEŞİM VE ANİMASYON ---
-            // Taşın yerine oturduğu anki vurma/sıkışma animasyonunu ve toz efektini başlatıyoruz.
-            // Bu animasyon akışı bozmamak için Coroutine (arka plan işlemi) olarak bağımsız çalışır.
+            // Taşın yerine oturduğu anki vurma/sıkışma animasyonunu başlatıyoruz.
             StartCoroutine(SquashAndStretchPlace(currentSelectionObj));
 
             permanentSelections.Add(currentSelectionObj);
@@ -346,6 +452,21 @@ public class Selection_Manager : MonoBehaviour
                 }
             }
 
+            // --- COMBO + SKOR (Sıra önemli: önce Combo, sonra Skor!) ---
+            // Dünya pozisyonunu hesapla (Floating text için)
+            Vector3 blockWorldCenter = new Vector3(
+                (minX + maxX) / 2f - (gridManager.width  - 1) / 2f,
+                (minY + maxY) / 2f - (gridManager.height - 1) / 2f,
+                0f
+            );
+            Color placedColor = currentSpriteRenderer != null ? currentSpriteRenderer.color : Color.white;
+            // 1) Combo bar güncelle (renk + multiplier)
+            if (ComboBarManager.Instance != null)
+                ComboBarManager.Instance.OnSuccessfulFill(placedColor, blockWorldCenter);
+            // 2) Skoru hesapla (güncel multiplier kullanır)
+            if (ScoreManager.Instance != null)
+                ScoreManager.Instance.AddScore(selectedArea);
+
             if (gameManager != null)
             {
                 gameManager.CheckWinCondition();//Bu kısımda dolu olan kare sayısı gridi tamamladıysa yani win conditiona uyuyorsa win alıyoruz.
@@ -354,12 +475,16 @@ public class Selection_Manager : MonoBehaviour
         else
         {
             Debug.Log($"[DEBUG] HATALI HAMLE - Frame: {Time.frameCount}, Obje: {currentSelectionObj?.name}");
-            // --- HATALı HAMLE ---
-            // Kurallardan herhangi biri ihlal edildiyse animasyonu başlat
-            //Sönme listesine ekliyoruz ki seviye geçişinde temizlenebilsin.
+            
+            // --- HATA SESİ (Can Kaybı İptal Edildi) ---
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayErrorSound(); // Sadece metal çınlama sesi çalsın
+            }
+
+            // --- HATALI HAMLE GÖRSELİ (KIRMIZI YANIP SÖNME) ---
             fadingSelections.Add(currentSelectionObj);
             StartCoroutine(FlashRedAndDestroy(currentSelectionObj, currentSpriteRenderer, currentLineRenderer));
-            //Hatalı obje coroutine'e devredildi, referansı sıfırlıyoruz.
             currentSelectionObj = null;
         }
     }
@@ -383,67 +508,96 @@ public class Selection_Manager : MonoBehaviour
 
     void UpdateSelectionVisual()
     {
-        // Eğer sahnede seçili bir obje yoksa boşuna çalışma
         if (currentSelectionObj == null) return;
 
-        // Grid'in ortalama offset değerlerini Selection_Manager içinde de hesaba katıyoruz
+        // --- DİNAMİK SAYDAMLIK (OPAKLIK) KONTROLÜ ---
+        int minX = Mathf.Min(startCoords.x, currentCoords.x);
+        int maxX = Mathf.Max(startCoords.x, currentCoords.x);
+        int minY = Mathf.Min(startCoords.y, currentCoords.y);
+        int maxY = Mathf.Max(startCoords.y, currentCoords.y);
+
+        int selectedArea = (maxX - minX + 1) * (maxY - minY + 1);
+        int numberCount = 0;
+        int foundNumber = 0;
+        bool hasOverlap = false;
+
+        for (int x = minX; x <= maxX; x++)
+        {
+            for (int y = minY; y <= maxY; y++)
+            {
+                GameObject tileObj = gridManager.GetTileAt(x, y);
+                if (tileObj != null)
+                {
+                    Tile tileComponent = tileObj.GetComponent<Tile>();
+                    if (tileComponent.isFilled) hasOverlap = true;
+                    if (tileComponent.targetNumber > 0)
+                    {
+                        numberCount++;
+                        foundNumber = tileComponent.targetNumber;
+                    }
+                }
+            }
+        }
+
+        // Eğer tek sayı varsa, çakışma yoksa ve alan o sayıya tam eşitse belirgin (0.8f), aksi halde silik (0.3f)
+        float targetAlpha = (numberCount == 1 && selectedArea == foundNumber && !hasOverlap) ? 0.85f : dragAlpha;
+
+        if (currentSpriteRenderer != null)
+        {
+            Color c = currentSpriteRenderer.color;
+            c.a = targetAlpha;
+            currentSpriteRenderer.color = c;
+        }
+
         float offsetX = (gridManager.width - 1) / 2f;
         float offsetY = (gridManager.height - 1) / 2f;
 
-        // 1. İÇ DOLGU (SPRITE) MERKEZİNİ VE BOYUTUNU AYARLAMA
-        // Matris koordinatlarından tekrar dünya pozisyonuna dönüştürmek için offsetleri çıkartıyoruz
         float centerX = ((startCoords.x + currentCoords.x) / 2f) - offsetX;
         float centerY = ((startCoords.y + currentCoords.y) / 2f) - offsetY;
 
         float width = Mathf.Abs(startCoords.x - currentCoords.x) + 1;
         float height = Mathf.Abs(startCoords.y - currentCoords.y) + 1;
 
-        // --- PADDING (BOŞLUK) HESAPLAMALARI ---
-        // Gölgelerin dışarı taşmasını engellemek ve hücreler arasında zarif bir boşluk bırakmak için
-        // Jöle bloklarını tam 1x1 hücre boyutu yerine biraz küçültüyoruz.
-        float shadowThickness = 0.06f; // Daha ince ve zarif bir gölge
-        float paddingX = 0.08f;
-        float paddingY = 0.14f;
+        float shadowThickness = 0.08f; 
+        float paddingX = 0.06f;
+        float paddingY = 0.12f;
 
-        // Gölgeyle birlikte bloğun hücreyi dikeyde tam ortalaması için ana objeyi yukarı kaydırıyoruz.
         float visualCenterY = centerY + (shadowThickness / 2f); 
 
         // Z eksenini -0.1f yapıyoruz ki gridin önünde dursun.
         currentSelectionObj.transform.position = new Vector3(centerX, visualCenterY, -0.1f);
 
-        // Objeyi hücrelerden biraz küçük (boşluklu) olacak şekilde ölçeklendiriyoruz
         float visualWidth = width - paddingX;
         float visualHeight = height - paddingY;
-        currentSelectionObj.transform.localScale = new Vector3(visualWidth, visualHeight, 1);
+        
+        // --- TELEFON UYGULAMASI (IMAGE 2) GÖRÜNÜMÜ İÇİN 9-SLICE SİSTEMİ ---
+        currentSelectionObj.transform.localScale = Vector3.one; 
+        
+        if (currentSpriteRenderer != null)
+        {
+            currentSpriteRenderer.drawMode = SpriteDrawMode.Sliced;
+            currentSpriteRenderer.size = new Vector2(visualWidth, visualHeight);
+        }
 
-        // Gölge (3D efekti) pozisyonunu sabit tutmak için visualHeight'a bölerek ayarlıyoruz
         Transform shadowTransform = currentSelectionObj.transform.Find("JellyShadow");
         if (shadowTransform != null)
         {
-            // Obje 'visualHeight' kadar scale edildiği için local offset'i bölmeliyiz.
-            shadowTransform.localPosition = new Vector3(0, -shadowThickness / visualHeight, 0.05f);
+            SpriteRenderer shadowSr = shadowTransform.GetComponent<SpriteRenderer>();
+            if (shadowSr != null)
+            {
+                shadowSr.drawMode = SpriteDrawMode.Sliced;
+                shadowSr.size = new Vector2(visualWidth, visualHeight);
+                Color sc = shadowSr.color;
+                sc.a = targetAlpha;
+                shadowSr.color = sc;
+            }
+            shadowTransform.localPosition = new Vector3(0, -shadowThickness, 0.05f);
         }
 
-        // 2. KENARLIKLARI (LINE RENDERER) KUTUNUN ETRAFINA ÇİZME
+        // TELEFON OYUNU GÖRÜNÜMÜ (SOLID) İÇİN ÇİZGİLER TAMAMEN KAPATILDI
         if (currentLineRenderer != null)
         {
-            // useWorldSpace = false olduğu için koordinatlar Transform'un merkezine (0,0,0) göre belirlenmeli.
-            // Transform scale edildiği için -0.5 ile 0.5 arası tam köşelere denk gelir.
-            float minX = -0.5f;
-            float maxX = 0.5f;
-            float maxY = 0.5f;
-            
-            // Alt kenarlık gölgenin bittiği yere kadar iniyor! 
-            // Local space'te olduğumuz için gölge kalınlığını gerçek dünya boyutuna (visualHeight) bölerek küçültüyoruz.
-            float minY = -0.5f - (shadowThickness / visualHeight);
-
-            float zPos = -0.2f;
-
-            currentLineRenderer.SetPosition(0, new Vector3(minX, minY, zPos)); // Sol Alt
-            currentLineRenderer.SetPosition(1, new Vector3(minX, maxY, zPos)); // Sol Üst
-            currentLineRenderer.SetPosition(2, new Vector3(maxX, maxY, zPos)); // Sağ Üst
-            currentLineRenderer.SetPosition(3, new Vector3(maxX, minY, zPos)); // Sağ Alt
-            currentLineRenderer.SetPosition(4, new Vector3(minX, minY, zPos)); // Kareyi kapatmak için başa dön (Sol Alt)
+            currentLineRenderer.enabled = false;
         }
     }
 
@@ -556,7 +710,10 @@ public class Selection_Manager : MonoBehaviour
         KatanaSlash katanaSlash = katanaSlashObj.AddComponent<KatanaSlash>();
         
         // Bloğun gerçek boyutunu veriyoruz ki kılıç izi bloğu tamamen boydan boya kessin
-        Vector2 blockSize = new Vector2(obj.transform.localScale.x, obj.transform.localScale.y);
+        // Sliced mode kullandığımız için gerçek boyut localScale'de değil, SpriteRenderer'ın size özelliğindedir!
+        SpriteRenderer sr = obj.GetComponent<SpriteRenderer>();
+        Vector2 blockSize = sr != null ? sr.size : new Vector2(1, 1);
+        
         katanaSlash.PlaySlash(blockSize);
 
         // --- FLOATING TEXT (KUTLAMA YAZISI) ---
@@ -638,7 +795,7 @@ public class Selection_Manager : MonoBehaviour
     private IEnumerator TrembleRoutine(GameObject obj)
     {
         Vector3 startPos = obj.transform.localPosition;
-        float duration = 0.4f; // Sakin bir geri dönüş süresi
+        float duration = 1.2f; // Çok daha uzun ve dingin bir geri dönüş süresi (Titreme uzatıldı)
         float elapsed = 0f;
 
         // Orijinal rengi kaydet (Parlama efekti için)
@@ -769,12 +926,36 @@ public class Selection_Manager : MonoBehaviour
 
             UpdateSelectionVisual();
 
+            // UpdateSelectionVisual saydamlığı (alpha) 0.85'e çektiği için, 
+            // kalıcı olan bu ipucu bloğunu tam opak (1.0f) hale getirmeliyiz.
+            if (currentSpriteRenderer != null)
+            {
+                Color c = currentSpriteRenderer.color;
+                c.a = lockedAlpha;
+                currentSpriteRenderer.color = c;
+                currentSpriteRenderer.sortingOrder = 10;
+            }
+
+            Transform shadowTransform = currentSelectionObj.transform.Find("JellyShadow");
+            if (shadowTransform != null)
+            {
+                SpriteRenderer shadowSr = shadowTransform.GetComponent<SpriteRenderer>();
+                if (shadowSr != null)
+                {
+                    shadowSr.enabled = true;
+                    Color sc = shadowSr.color;
+                    sc.a = lockedAlpha;
+                    shadowSr.color = sc;
+                    shadowSr.sortingOrder = 9;
+                }
+            }
+
             BoxCollider2D bc = currentSelectionObj.GetComponent<BoxCollider2D>();
             if (bc != null) bc.enabled = true;
 
             permanentSelections.Add(currentSelectionObj);
             
-            // Hücreleri dolu olarak işaretle
+            // Hücreleri dolu olarak işaretle ve görsellerini gizle
             for (int x = correctRect.x; x < correctRect.x + correctRect.w; x++)
             {
                 for (int y = correctRect.y; y < correctRect.y + correctRect.h; y++)
@@ -784,12 +965,44 @@ public class Selection_Manager : MonoBehaviour
                     {
                         Tile tComp = tObj.GetComponent<Tile>();
                         tComp.isFilled = true;
+                        tComp.UpdateTextDisplay();
+
+                        SpriteRenderer tileSr = tObj.GetComponent<SpriteRenderer>();
+                        if (tileSr != null) tileSr.enabled = false;
                     }
                 }
             }
 
+            GameObject placedHintObj = currentSelectionObj;
+            
+            // Hint objesini korumak için referansı boşaltıyoruz ki TouchUp onu yok etmesin
+            currentSelectionObj = null;
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlaySlashSound();
+            }
+
             // Kılıç efekti ve sarsıntılar için Squash rutinini başlat
-            StartCoroutine(SquashAndStretchPlace(currentSelectionObj));
+            StartCoroutine(SquashAndStretchPlace(placedHintObj));
+
+            // --- COMBO + SKOR (Hint yerleştirmeleri için de aynı mantık) ---
+            int hintArea = correctRect.w * correctRect.h;
+            Vector3 hintCenter = new Vector3(
+                correctRect.x + correctRect.w / 2f - (gridManager.width  - 1) / 2f,
+                correctRect.y + correctRect.h / 2f - (gridManager.height - 1) / 2f,
+                0f
+            );
+            Color hintColor = placedHintObj != null
+                ? (placedHintObj.GetComponent<SpriteRenderer>()?.color ?? Color.white)
+                : Color.white;
+
+            // 1) Combo bar güncelle
+            if (ComboBarManager.Instance != null)
+                ComboBarManager.Instance.OnSuccessfulFill(hintColor, hintCenter);
+            // 2) Skoru hesapla (güncel multiplier kullanır)
+            if (ScoreManager.Instance != null)
+                ScoreManager.Instance.AddScore(hintArea);
 
             // Kazanma durumu kontrolü
             GameManager gameManager = FindAnyObjectByType<GameManager>();
