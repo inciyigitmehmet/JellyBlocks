@@ -8,7 +8,8 @@ public class ZenLevelCompleteScreen : MonoBehaviour
 {
     private string[] titles = { 
         "Immaculate!", "Flawless!", "Perfect!", "Zen Mastery!", 
-        "Brilliant!", "Outstanding!", "Exceptional!", "Spotless!", "Pure Genius!" 
+        "Brilliant!", "Outstanding!", "Exceptional!", "Spotless!", "Pure Genius!",
+        "Flow State", "Clarity", "Harmony", "Serenity"
     };
     private string[] proverbs = {
         "You trusted your logic and it paid off perfectly.",
@@ -22,27 +23,67 @@ public class ZenLevelCompleteScreen : MonoBehaviour
     };
 
     private System.Action onCompleteCallback;
-    private bool isTransitioning = false;
-    private Image bgImg;
-    private CanvasGroup canvasGroup;
 
     public void ShowScreen(System.Action onComplete)
     {
         onCompleteCallback = onComplete;
-        StartCoroutine(ScreenRoutine());
+        StartCoroutine(ShojiRoutine());
     }
 
-    private IEnumerator ScreenRoutine()
+    public void ShowOpenDoorsOnly()
     {
-        // 1. KANVAS VE ARKA PLAN
+        StartCoroutine(OpenDoorsRoutine());
+    }
+
+    private IEnumerator OpenDoorsRoutine()
+    {
+        Canvas canvas = gameObject.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 100;
+        gameObject.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        gameObject.AddComponent<GraphicRaycaster>(); 
+
+        GameObject leftDoor = CreateShojiDoor(canvas.transform, true);
+        GameObject rightDoor = CreateShojiDoor(canvas.transform, false);
+        
+        RectTransform leftRt = leftDoor.GetComponent<RectTransform>();
+        RectTransform rightRt = rightDoor.GetComponent<RectTransform>();
+
+        // Başlangıçta kapılar tamamen kapalı (0,0)
+        leftRt.anchoredPosition = Vector2.zero;
+        rightRt.anchoredPosition = Vector2.zero;
+
+        float offscreenOffset = 2500f;
+        
+        // Çok kısa bekle, arka plan gizlensin kapılar görünsün
+        yield return new WaitForSeconds(0.1f);
+
+        // KAPILARIN AÇILMA (SLIDE OUT) ANİMASYONU
+        float slideOutDuration = 0.5f;
+        float elapsed = 0f;
+        while(elapsed < slideOutDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / slideOutDuration;
+            float easeT = t * t * (3f - 2f * t); 
+            
+            leftRt.anchoredPosition = new Vector2(Mathf.Lerp(0, -offscreenOffset, easeT), 0);
+            rightRt.anchoredPosition = new Vector2(Mathf.Lerp(0, offscreenOffset, easeT), 0);
+            yield return null;
+        }
+
+        Destroy(gameObject);
+    }
+
+    private IEnumerator ShojiRoutine()
+    {
         Canvas canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 100;
 
         gameObject.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        gameObject.AddComponent<GraphicRaycaster>(); // Buton tıklaması için gerekli!
+        gameObject.AddComponent<GraphicRaycaster>(); 
         
-        // EventSystem yoksa ekle (Buton tıklaması için zorunlu)
         if (FindAnyObjectByType<EventSystem>() == null)
         {
             GameObject eventSystem = new GameObject("EventSystem");
@@ -50,116 +91,213 @@ public class ZenLevelCompleteScreen : MonoBehaviour
             eventSystem.AddComponent<StandaloneInputModule>();
         }
 
-        canvasGroup = gameObject.AddComponent<CanvasGroup>();
-        canvasGroup.alpha = 0f;
+        // KAPILAR
+        GameObject leftDoor = CreateShojiDoor(canvas.transform, true);
+        GameObject rightDoor = CreateShojiDoor(canvas.transform, false);
+        
+        RectTransform leftRt = leftDoor.GetComponent<RectTransform>();
+        RectTransform rightRt = rightDoor.GetComponent<RectTransform>();
 
-        GameObject bgObj = new GameObject("Background");
-        bgObj.transform.SetParent(transform, false);
-        RectTransform bgRect = bgObj.AddComponent<RectTransform>();
-        bgRect.anchorMin = Vector2.zero;
-        bgRect.anchorMax = Vector2.one;
-        bgRect.sizeDelta = Vector2.zero;
-        bgImg = bgObj.AddComponent<Image>();
-        bgImg.color = new Color(0.96f, 0.95f, 0.90f, 0.85f); // Arkadaki grid hafifçe görünsün
+        float offscreenOffset = 2500f;
+        leftRt.anchoredPosition = new Vector2(-offscreenOffset, 0);
+        rightRt.anchoredPosition = new Vector2(offscreenOffset, 0);
 
-        // 2. BAŞLIK
+        // KAPANMA (SLIDE IN)
+        float slideInDuration = 0.35f; // Çok daha hızlı ve sert kapansın
+        float elapsed = 0f;
+        while(elapsed < slideInDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / slideInDuration;
+            float easeT = 1f - Mathf.Pow(1f - t, 4f); 
+            
+            leftRt.anchoredPosition = new Vector2(Mathf.Lerp(-offscreenOffset, 0, easeT), 0);
+            rightRt.anchoredPosition = new Vector2(Mathf.Lerp(offscreenOffset, 0, easeT), 0);
+            yield return null;
+        }
+
+        leftRt.anchoredPosition = Vector2.zero;
+        rightRt.anchoredPosition = Vector2.zero;
+
+        if (AudioManager.Instance != null) AudioManager.Instance.PlayLevelCompleteSound(); // Tek Zen sesi: Kapılar kapandığı an çalar
+
+        // METİN GRUBU (Tüm ekranı kaplaması için RectTransform eklendi!)
+        GameObject textParent = new GameObject("TextGroup");
+        textParent.transform.SetParent(canvas.transform, false);
+        RectTransform tpRt = textParent.AddComponent<RectTransform>();
+        tpRt.anchorMin = Vector2.zero;
+        tpRt.anchorMax = Vector2.one;
+        tpRt.sizeDelta = Vector2.zero;
+        tpRt.anchoredPosition = Vector2.zero;
+
+        CanvasGroup textGroup = textParent.AddComponent<CanvasGroup>();
+        textGroup.alpha = 1f; // Başlangıçta görünür
+
+        // BAŞLIK (DAMGA)
         GameObject titleObj = new GameObject("Title");
-        titleObj.transform.SetParent(transform, false);
+        titleObj.transform.SetParent(textParent.transform, false);
         RectTransform titleRect = titleObj.AddComponent<RectTransform>();
-        titleRect.anchorMin = new Vector2(0.05f, 0.6f); // Biraz daha geniş ve aşağıda
-        titleRect.anchorMax = new Vector2(0.95f, 0.85f);
+        // Başlığı çok daha büyümesi için alanını genişletip hafif yukarı alıyoruz
+        // X ekseninde 0.15 ve 0.85 yaparak kırmızı Torii sütunlarına taşmasını KESİNLİKLE engelliyoruz
+        titleRect.anchorMin = new Vector2(0.15f, 0.60f); 
+        titleRect.anchorMax = new Vector2(0.85f, 0.90f);
         titleRect.sizeDelta = Vector2.zero;
         
         TextMeshProUGUI titleText = titleObj.AddComponent<TextMeshProUGUI>();
         titleText.text = titles[Random.Range(0, titles.Length)];
-        titleText.fontSize = 130;
-        titleText.enableAutoSizing = true; // Taştığında otomatik küçült
-        titleText.fontSizeMin = 60;
-        titleText.fontSizeMax = 150;
+        titleText.fontSize = 220; // Çok daha büyük
+        titleText.enableAutoSizing = true;
+        titleText.fontSizeMin = 100;
+        titleText.fontSizeMax = 280;
         titleText.fontStyle = FontStyles.Italic | FontStyles.Bold;
         titleText.alignment = TextAlignmentOptions.Center;
-        titleText.color = new Color(0.9f, 0.3f, 0.3f, 1f); // Kırmızı
+        titleText.color = new Color(0.85f, 0.15f, 0.15f, 0f); // Başlangıçta şeffaf
         
-        // Başlık Gölgesi
         Shadow titleShadow = titleObj.AddComponent<Shadow>();
-        titleShadow.effectColor = new Color(0, 0, 0, 0.2f);
-        titleShadow.effectDistance = new Vector2(3, -3);
+        titleShadow.effectColor = new Color(0, 0, 0, 0.4f);
+        titleShadow.effectDistance = new Vector2(4, -4);
 
-        // 3. ALT YAZI (ATASÖZÜ)
+        // ALT YAZI (FIRÇA / TYPEWRITER)
         GameObject provObj = new GameObject("Proverb");
-        provObj.transform.SetParent(transform, false);
+        provObj.transform.SetParent(textParent.transform, false);
         RectTransform provRect = provObj.AddComponent<RectTransform>();
-        provRect.anchorMin = new Vector2(0.05f, 0.35f); // Daha geniş alan
-        provRect.anchorMax = new Vector2(0.95f, 0.55f);
+        // Atasözünü çok aşağıdan kurtarıp, hafif ortaya ve yukarı taşıyoruz
+        provRect.anchorMin = new Vector2(0.15f, 0.30f); 
+        provRect.anchorMax = new Vector2(0.85f, 0.55f);
         provRect.sizeDelta = Vector2.zero;
 
         TextMeshProUGUI provText = provObj.AddComponent<TextMeshProUGUI>();
-        provText.text = proverbs[Random.Range(0, proverbs.Length)];
-        provText.fontSize = 55;
-        provText.enableAutoSizing = true; // Taştığında otomatik küçült
-        provText.fontSizeMin = 30;
-        provText.fontSizeMax = 70;
-        provText.alignment = TextAlignmentOptions.Center;
-        provText.color = new Color(0.2f, 0.2f, 0.2f, 1f);
+        string fullProverb = proverbs[Random.Range(0, proverbs.Length)];
+        provText.text = ""; // Başlangıçta boş
+        provText.fontSize = 45; // Boyutunu küçülttük ki zıtlık oluşsun
+        provText.enableAutoSizing = true; 
+        provText.fontSizeMin = 25;
+        provText.fontSizeMax = 55;
+        provText.alignment = TextAlignmentOptions.Top;
+        provText.color = new Color(0.1f, 0.1f, 0.1f, 1f); 
 
-        // Ekranı yavaşça belirginleştir
-        float elapsed = 0;
-        while(elapsed < 0.5f)
-        {
-            elapsed += Time.deltaTime;
-            canvasGroup.alpha = Mathf.Lerp(0f, 1f, elapsed/0.5f);
-            yield return null;
-        }
+        // DAMGA ANİMASYONU (Sadece Başlık)
+        Vector3 stampStartScale = new Vector3(3f, 3f, 1f); 
+        titleRect.localScale = stampStartScale;
 
-        // Yazıyı okuması için bekleyiş
-        yield return new WaitForSeconds(2.0f);
-
-        // Otomatik olarak kılıç kesiği ile yeni bölüme geçiş yap
-        StartCoroutine(TransitionRoutine());
-    }
-
-    private IEnumerator TransitionRoutine()
-    {
-        // UI Katana Kesiği Efekti
-        GameObject slashObj = new GameObject("UIKatanaSlash");
-        slashObj.transform.SetParent(transform, false);
-        RectTransform rt = slashObj.AddComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0.5f, 0.5f);
-        rt.anchorMax = new Vector2(0.5f, 0.5f);
-        rt.sizeDelta = new Vector2(0, 30); // Kalın, devasa bir kesik
-        rt.localRotation = Quaternion.Euler(0, 0, Random.Range(15f, 45f) * (Random.value > 0.5f ? 1 : -1));
-        
-        Image img = slashObj.AddComponent<Image>();
-        img.color = Color.white; // Bembeyaz parlayan bir kılıç izi
-
-        // 1. Şimşek gibi uzama
-        float duration = 0.1f;
-        float elapsed = 0f;
-        while(elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            rt.sizeDelta = new Vector2(Mathf.Lerp(0, 4000, elapsed/duration), 30);
-            yield return null;
-        }
-
-        // Kesik atılır atılmaz arka plan yüklemesi başlasın
-        if (onCompleteCallback != null) onCompleteCallback.Invoke();
-
-        // 2. Solarla kaybolma ve tüm ekranın kararması
-        duration = 0.3f;
+        float stampDuration = 0.2f; // Damga çok hızlı vurulur
         elapsed = 0f;
-        while(elapsed < duration)
+        while(elapsed < stampDuration)
         {
             elapsed += Time.deltaTime;
-            float t = elapsed / duration;
-            img.color = new Color(1, 1, 1, Mathf.Lerp(1, 0, t));
-            rt.sizeDelta = new Vector2(4000, Mathf.Lerp(30, 0, t));
+            float t = elapsed / stampDuration;
+            float easeT = 1f - Mathf.Pow(1f - t, 3f);
             
-            // Ekran da kılıç darbesiyle yavaşça kararıp silinsin
-            canvasGroup.alpha = Mathf.Lerp(1f, 0f, t);
+            titleRect.localScale = Vector3.Lerp(stampStartScale, Vector3.one, easeT);
+            // Kırmızı renk aniden belirsin
+            titleText.color = new Color(0.85f, 0.15f, 0.15f, easeT);
+            yield return null;
+        }
+        titleRect.localScale = Vector3.one;
+        titleText.color = new Color(0.85f, 0.15f, 0.15f, 1f);
+
+        // FIRÇA EFEKTİ (Daktilo / Typewriter)
+        float typingDuration = 0.8f; // Fırçayla yazılma süresi
+        float timePerChar = typingDuration / fullProverb.Length;
+        for (int i = 0; i < fullProverb.Length; i++)
+        {
+            provText.text += fullProverb[i];
+            yield return new WaitForSeconds(timePerChar);
+        }
+
+        // Okumak için bekle
+        yield return new WaitForSeconds(1.5f);
+
+        // ARKADA YENİ BÖLÜMÜ YÜKLE
+        if (onCompleteCallback != null) onCompleteCallback.Invoke();
+        yield return new WaitForSeconds(0.2f);
+
+        // Kapıların açılma sesi iptal edildi, artık tek ses kapanma anında çalıyor.
+
+        // KAPILARIN AÇILMA (SLIDE OUT) ANİMASYONU
+        float slideOutDuration = 0.5f;
+        elapsed = 0f;
+        while(elapsed < slideOutDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / slideOutDuration;
+            float easeT = t * t * (3f - 2f * t); 
+            
+            textGroup.alpha = 1f - (t * 4f); // Metinler anında kaybolur
+            
+            leftRt.anchoredPosition = new Vector2(Mathf.Lerp(0, -offscreenOffset, easeT), 0);
+            rightRt.anchoredPosition = new Vector2(Mathf.Lerp(0, offscreenOffset, easeT), 0);
             yield return null;
         }
 
         Destroy(gameObject);
+    }
+
+    private GameObject CreateShojiDoor(Transform parent, bool isLeft)
+    {
+        GameObject doorObj = new GameObject(isLeft ? "ShojiLeft" : "ShojiRight");
+        doorObj.transform.SetParent(parent, false);
+        RectTransform rt = doorObj.AddComponent<RectTransform>();
+        
+        Image paper = doorObj.AddComponent<Image>();
+        paper.color = new Color(0.96f, 0.94f, 0.90f); 
+        
+        if (isLeft)
+        {
+            rt.anchorMin = new Vector2(0, 0);
+            rt.anchorMax = new Vector2(0.5f, 1);
+            rt.pivot = new Vector2(1, 0.5f); 
+        }
+        else
+        {
+            rt.anchorMin = new Vector2(0.5f, 0);
+            rt.anchorMax = new Vector2(1, 1);
+            rt.pivot = new Vector2(0, 0.5f); 
+        }
+        rt.anchoredPosition = Vector2.zero;
+        rt.sizeDelta = Vector2.zero;
+        
+        // Torii kapısı kırmızısı
+        Color woodColor = new Color(0.25f, 0.05f, 0.05f); 
+        
+        // ORTADAKİ DİKEY ÇİZGİYİ TAMAMEN SİLDİK! (Yazıların okunmasını engelliyordu)
+        // Artık kapılar birleştiğinde ortası tamamen pürüzsüz pirinç kağıdı olacak.
+
+        // Dış kenar direği (Torii kapısının devasa yan sütunları gibi kalınlaştırıldı)
+        GameObject outFrame = new GameObject("OutFrame");
+        outFrame.transform.SetParent(doorObj.transform, false);
+        RectTransform outRt = outFrame.AddComponent<RectTransform>();
+        Image outImg = outFrame.AddComponent<Image>();
+        outImg.color = woodColor;
+        
+        outRt.anchorMin = isLeft ? new Vector2(0, 0) : new Vector2(1, 0);
+        outRt.anchorMax = isLeft ? new Vector2(0, 1) : new Vector2(1, 1);
+        outRt.pivot = isLeft ? new Vector2(0, 0.5f) : new Vector2(1, 0.5f);
+        outRt.sizeDelta = new Vector2(60, 0); // Kalın devasa Torii sütunu
+        outRt.anchoredPosition = Vector2.zero;
+
+        // Üst ve Alt Çerçeveler (Torii'nin çatısı gibi üstü devasa yaptık)
+        CreateHorizontalRib(doorObj.transform, woodColor, 1f, 120); // Üst tahta (Torii Çatısı)
+        CreateHorizontalRib(doorObj.transform, woodColor, 0f, 40); // Alt zemin tahtası
+
+        // Kapının ortasını tamamen BOŞ bıraktık. İç ızgara yok, orta çizgi yok.
+        // Tam bir Japon kaligrafi tuvali!
+
+        return doorObj;
+    }
+
+    private void CreateHorizontalRib(Transform parent, Color color, float yAnchor, float height)
+    {
+        GameObject rib = new GameObject("HorizontalRib");
+        rib.transform.SetParent(parent, false);
+        RectTransform ribRt = rib.AddComponent<RectTransform>();
+        Image ribImg = rib.AddComponent<Image>();
+        ribImg.color = color;
+        
+        ribRt.anchorMin = new Vector2(0, yAnchor);
+        ribRt.anchorMax = new Vector2(1, yAnchor);
+        ribRt.pivot = new Vector2(0.5f, yAnchor);
+        ribRt.sizeDelta = new Vector2(0, height); 
+        ribRt.anchoredPosition = Vector2.zero;
     }
 }

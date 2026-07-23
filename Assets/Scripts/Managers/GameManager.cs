@@ -1,4 +1,5 @@
 using UnityEngine;
+using TMPro;
 
 public class GameManager : MonoBehaviour
 {
@@ -12,10 +13,26 @@ public class GameManager : MonoBehaviour
     private Selection_Manager selectionManager;
 
     //Seviyenin kazanılıp kazanılmadığını tutan kilit değişkeni.
-    private bool isLevelWon = false;
+    public bool isLevelWon = false;
 
     //Aktif WinSequence coroutine'ini takip eden referans.
+    //Aktif WinSequence coroutine'ini takip eden referans.
     private Coroutine winCoroutine = null;
+
+    [Header("Hint System")]
+    public int currentHints = 45;
+    public TextMeshProUGUI hintCountText;
+    public RectTransform hintButtonRect;
+    public GameObject floatingHintPlusPrefab;
+    private int levelsCompletedSinceLastHint = 0;
+
+    [Header("Gold System")]
+    public int currentGold = 0;
+    public TextMeshProUGUI goldCountText;
+    public UnityEngine.UI.Image goldIconImage; // Altın ikon öğesi (Coin sprite)
+
+    [Header("Level Info UI")]
+    public TextMeshProUGUI levelText; // Üst ortada "Level X" yazan metin
 
     private void Start()
     {
@@ -32,6 +49,39 @@ public class GameManager : MonoBehaviour
         }
 
         selectionManager = FindAnyObjectByType<Selection_Manager>();
+
+        // İpucu sistemini kayıttan yükle
+        currentHints = PlayerPrefs.GetInt("HintCount", 45);
+        levelsCompletedSinceLastHint = PlayerPrefs.GetInt("LevelsSinceLastHint", 0);
+        UpdateHintUI();
+
+        // Altın sistemini kayıttan yükle
+        currentGold = PlayerPrefs.GetInt("GoldCount", 0);
+        UpdateGoldUI();
+    }
+
+    private void UpdateGoldUI()
+    {
+        if (goldCountText != null)
+        {
+            goldCountText.text = currentGold.ToString();
+        }
+    }
+
+    public void UpdateLevelText(int levelNumber)
+    {
+        if (levelText != null)
+        {
+            levelText.text = $"Level {levelNumber}";
+        }
+    }
+
+    private void UpdateHintUI()
+    {
+        if (hintCountText != null)
+        {
+            hintCountText.text = currentHints.ToString();
+        }
     }
 
     //Kazanıp kazanmadığımızı belli eden fonksiyon.
@@ -78,6 +128,28 @@ public class GameManager : MonoBehaviour
 
         //Kazanma durumunu kilitleyip geçiş sürecini başlatıyoruz.
         isLevelWon = true;
+
+        // ALTIN ÖDÜLÜ: Grid alanı x 2 (5x5 = 50 Gold)
+        int goldReward = (gridManager.width * gridManager.height) * 2;
+        AddGold(goldReward);
+        
+        // KOMBO BARINI DONDUR (Geçiş ekranında boşalmasın)
+        if (ComboBarManager.Instance != null)
+        {
+            ComboBarManager.Instance.PauseDrain();
+        }
+
+        // HINT (İPUCU) ÖDÜL SİSTEMİ: Her 2 bölümde bir +1 İpucu kazan.
+        levelsCompletedSinceLastHint++;
+        PlayerPrefs.SetInt("LevelsSinceLastHint", levelsCompletedSinceLastHint);
+        
+        if (levelsCompletedSinceLastHint >= 2)
+        {
+            levelsCompletedSinceLastHint = 0;
+            PlayerPrefs.SetInt("LevelsSinceLastHint", 0);
+            StartCoroutine(RewardHintSequence());
+        }
+
         winCoroutine = StartCoroutine(WinSequence());
     }
 
@@ -91,6 +163,12 @@ public class GameManager : MonoBehaviour
             winCoroutine = null;
         }
         isLevelWon = false;
+        
+        // KOMBO BARINI TEKRAR AKMAYA BAŞLAT
+        if (ComboBarManager.Instance != null)
+        {
+            ComboBarManager.Instance.ResumeDrain();
+        }
         
         // Yeni bölüme geçildiğinde canları sıfırla (İptal edildi)
         // currentLives = maxLives;
@@ -118,14 +196,15 @@ public class GameManager : MonoBehaviour
         //Her şeyin bittiği an kazanılan an. Tahta tamamen doldu.
         Debug.Log("Zen Complete!");
 
-        // 1. ADIM: Tüm blokları sars (Kılıç titreşimi - Tremble efekti)
+        // 1. ADIM: Tüm blokları sars ve aşağı dök (Pop & Drop efekti)
         if (selectionManager != null)
         {
-            selectionManager.TriggerWinTremble();
+            selectionManager.TriggerWinAnimation();
         }
         
-        // Titreme efektinin bitmesini bekle (yaklaşık 0.4 saniye)
-        yield return new WaitForSeconds(0.4f);
+        // Blokların havaya kalkıp aşağı dökülmesi için bekle (yaklaşık 2.5 saniye)
+        // Dökülme süresini uzattığımız için geçiş ekranının da ona göre daha geç girmesi gerekiyor.
+        yield return new WaitForSeconds(2.5f);
         
         // 2. ADIM: Zen Bölüm Sonu Ekranını Başlat
         if (zenCompleteScreenPrefab != null)
@@ -157,5 +236,107 @@ public class GameManager : MonoBehaviour
         }
         
         winCoroutine = null;
+    }
+
+    private System.Collections.IEnumerator RewardHintSequence()
+    {
+        // Kapının açılmasına tam denk gelmesi için süreyi güncelledik (5.6s)
+        yield return new WaitForSeconds(5.6f);
+
+        // Uçma animasyonu başlarken sayıyı hemen artır (Yazı yok olana kadar bekleme)
+        currentHints++;
+        PlayerPrefs.SetInt("HintCount", currentHints);
+        PlayerPrefs.Save();
+        
+        UpdateHintUI();
+
+        if (floatingHintPlusPrefab != null && hintButtonRect != null)
+        {
+            // Yazıyı direkt Hint Butonunun İÇİNE (child) koyuyoruz. 
+            // Böylece anchor (çapa) sorunları yüzünden ekranın dışına veya yanlış yere gitmesi imkansızlaşır!
+            GameObject floatingObj = Instantiate(floatingHintPlusPrefab, hintButtonRect);
+            floatingObj.SetActive(true); // Sahnede gizli/açık olmasına karşı her zaman aktif et
+
+            RectTransform floatRt = floatingObj.GetComponent<RectTransform>();
+            TextMeshProUGUI floatingText = floatingObj.GetComponent<TextMeshProUGUI>();
+
+            if (floatRt != null && floatingText != null)
+            {
+                // Butonun tam ortasından başla
+                floatRt.anchoredPosition = Vector2.zero; 
+                floatingText.text = "+1";
+                
+                // Rengini prefabdan (senin ayarladığın renkten) alması için
+                // koddaki sabit renk atamasını sildim!
+                
+                float animDuration = 1.5f;
+                float elapsed = 0f;
+                Vector2 startPos = floatRt.anchoredPosition;
+                Vector2 endPos = startPos + new Vector2(0, 150f); // 150 piksel yukarı uçar
+
+                while (elapsed < animDuration)
+                {
+                    elapsed += Time.deltaTime;
+                    float t = elapsed / animDuration;
+                    
+                    // Yumuşak uçuş ve Alpha (şeffaflaşma) UI için anchoredPosition kullanılmalı!
+                    floatRt.anchoredPosition = Vector2.Lerp(startPos, endPos, t);
+                    
+                    Color c = floatingText.color;
+                    c.a = 1f - t;
+                    floatingText.color = c;
+                    
+                    yield return null;
+                }
+            }
+            Destroy(floatingObj);
+        }
+    }
+
+    public void ConsumeHint()
+    {
+        if (currentHints > 0)
+        {
+            currentHints--;
+            PlayerPrefs.SetInt("HintCount", currentHints);
+            PlayerPrefs.Save();
+            UpdateHintUI();
+        }
+    }
+
+    public void AddGold(int amount)
+    {
+        currentGold += amount;
+        PlayerPrefs.SetInt("GoldCount", currentGold);
+        PlayerPrefs.Save();
+        UpdateGoldUI();
+
+        // Altın yazısında Pop efekti (DOTween ile)
+        if (goldCountText != null)
+        {
+            goldCountText.transform.localScale = Vector3.one;
+            goldCountText.transform.localScale = new Vector3(1.3f, 1.3f, 1f);
+            StartCoroutine(GoldPopAnimation());
+        }
+    }
+
+    private System.Collections.IEnumerator GoldPopAnimation()
+    {
+        if (goldCountText == null) yield break;
+        
+        float duration = 0.3f;
+        float elapsed = 0f;
+        Vector3 bigScale = new Vector3(1.3f, 1.3f, 1f);
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            // Ease Out Elastic benzeri geri sekme
+            float easeT = 1f - Mathf.Pow(1f - t, 3f);
+            goldCountText.transform.localScale = Vector3.Lerp(bigScale, Vector3.one, easeT);
+            yield return null;
+        }
+        goldCountText.transform.localScale = Vector3.one;
     }
 }

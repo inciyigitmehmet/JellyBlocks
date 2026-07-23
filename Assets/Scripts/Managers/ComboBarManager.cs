@@ -22,7 +22,6 @@ public class ComboBarManager : MonoBehaviour
     [Header("Combo Text Ayarları")]
     [SerializeField] private float comboFloatSpeed   = 2.8f;
     [SerializeField] private float comboFadeDuration = 1.5f;
-    [SerializeField] private Color comboTextColor    = new Color(1f, 0.85f, 0.1f, 1f);
 
     [Header("UI Referansları")]
     [SerializeField] private Image            barFill;
@@ -38,6 +37,9 @@ public class ComboBarManager : MonoBehaviour
     // --- Private ---
     private Tweener _drainTween;
     private Tweener _fillTween;
+    private bool _isPaused = false;
+    private Vector2 _originalComboLabelPos;
+    private Vector3 _originalComboLabelScale;
 
     // -----------------------------------------------------------------------
     void Awake()
@@ -49,7 +51,12 @@ public class ComboBarManager : MonoBehaviour
     void Start()
     {
         if (barFill != null) barFill.fillAmount = 0f;
-        UpdateComboLabel();
+        if (comboLabel != null) 
+        {
+            _originalComboLabelPos = comboLabel.rectTransform.anchoredPosition;
+            _originalComboLabelScale = comboLabel.transform.localScale;
+            comboLabel.text = "";
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -68,14 +75,14 @@ public class ComboBarManager : MonoBehaviour
         if (barWasActive)
         {
             CurrentCombo++;
-            SpawnComboText(fillPosition);
+            SpawnComboText(fillPosition, rectangleColor);
         }
         else
         {
             CurrentCombo = 1;
         }
 
-        UpdateComboLabel();
+        UpdateComboLabel(rectangleColor);
 
         if (barFill != null)
         {
@@ -102,6 +109,18 @@ public class ComboBarManager : MonoBehaviour
     }
 
     // -----------------------------------------------------------------------
+    public void PauseDrain()
+    {
+        _isPaused = true;
+        _drainTween?.Pause();
+    }
+
+    public void ResumeDrain()
+    {
+        _isPaused = false;
+        _drainTween?.Play();
+    }
+
     private void StartDraining()
     {
         if (barFill == null) return;
@@ -109,32 +128,56 @@ public class ComboBarManager : MonoBehaviour
             .DOFillAmount(0f, drainDuration)
             .SetEase(Ease.Linear)
             .OnComplete(OnBarDrained);
+
+        // Eğer oyun duraklatılmışsa (geçiş ekranındaysa) yeni başlayan drain'i anında dondur
+        if (_isPaused)
+        {
+            _drainTween.Pause();
+        }
     }
 
     private void OnBarDrained()
     {
         CurrentCombo = 1;
-        UpdateComboLabel();
+        UpdateComboLabel(Color.white);
     }
 
     // -----------------------------------------------------------------------
-    private void UpdateComboLabel()
+    private void UpdateComboLabel(Color c)
     {
         if (comboLabel == null) return;
+
+        comboLabel.DOKill(); // Aktif animasyonları durdur
         comboLabel.text = CurrentCombo > 1 ? $"{CurrentCombo}x" : "";
+        
+        c.a = 1f;
+        comboLabel.color = c;
 
         if (CurrentCombo > 1)
         {
-            // Küçükten büyüyüp oturan "pop" efekti
-            comboLabel.transform.localScale = Vector3.one * 0.5f;
-            comboLabel.transform
-                .DOScale(Vector3.one, 0.25f)
-                .SetEase(Ease.OutBack);
+            // Pozisyonu ve rotasyonu orijinal yerine al
+            comboLabel.rectTransform.anchoredPosition = _originalComboLabelPos;
+            comboLabel.transform.localRotation = Quaternion.identity;
+            
+            // "Pop" büyüme efekti
+            comboLabel.transform.localScale = _originalComboLabelScale * 0.5f;
+            comboLabel.transform.DOScale(_originalComboLabelScale, 0.3f).SetEase(Ease.OutBack);
+            
+            // --- YENİ: Titreme (Shake) ve Rotasyon (Punch) Efekti ---
+            // Z ekseninde hafifçe sağa sola sallanarak (titreyerek) çıkar
+            comboLabel.transform.DOPunchRotation(new Vector3(0, 0, 20f), 0.5f, 12, 1f);
+            
+            // Ayrıca pozisyon olarak da hafif titrer (punch)
+            comboLabel.rectTransform.DOPunchAnchorPos(new Vector2(Random.Range(-10f, 10f), Random.Range(-10f, 10f)), 0.4f, 10, 1f);
+
+            // Havaya süzülüp solma efekti!
+            comboLabel.rectTransform.DOAnchorPosY(_originalComboLabelPos.y + 60f, 0.75f).SetEase(Ease.OutQuad);
+            comboLabel.DOFade(0f, 0.6f).SetEase(Ease.InQuad).SetDelay(0.15f);
         }
     }
 
     // -----------------------------------------------------------------------
-    private void SpawnComboText(Vector3 worldPos)
+    private void SpawnComboText(Vector3 worldPos, Color c)
     {
         if (floatingTextPrefab == null) return;
 
@@ -143,12 +186,22 @@ public class ComboBarManager : MonoBehaviour
             : worldPos + new Vector3(0f, 0.5f, -2f);
 
         GameObject obj = Instantiate(floatingTextPrefab, spawnPos, Quaternion.identity);
+
+        // --- BOYUT HESAPLAMASI (CurrentCombo'ya göre büyüyen yazılar) ---
+        float scaleMult = 0.6f; // 1-4 arası (küçük)
+        if (CurrentCombo >= 20) scaleMult = 2.0f; // max boyut
+        else if (CurrentCombo >= 10) scaleMult = 1.5f; // büyük
+        else if (CurrentCombo >= 5) scaleMult = 1.0f; // orta
+        
+        obj.transform.localScale = Vector3.one * scaleMult;
+
         FloatingText ft = obj.GetComponent<FloatingText>();
         if (ft != null)
         {
+            c.a = 1f; // Opaklığı tam yapıyoruz ki silik çıkmasın
             ft.floatSpeed   = comboFloatSpeed;
             ft.fadeDuration = comboFadeDuration;
-            ft.Initialize($"{CurrentCombo}x COMBO!", comboTextColor);
+            ft.Initialize($"{CurrentCombo}x COMBO!", c);
         }
     }
 
@@ -159,6 +212,6 @@ public class ComboBarManager : MonoBehaviour
         _fillTween?.Kill();
         CurrentCombo = 1;
         if (barFill != null) barFill.DOFillAmount(0f, 0.2f);
-        UpdateComboLabel();
+        UpdateComboLabel(Color.white);
     }
 }

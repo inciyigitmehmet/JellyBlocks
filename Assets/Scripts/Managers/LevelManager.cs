@@ -11,6 +11,9 @@ public class LevelManager : MonoBehaviour
     private LevelData[] levels;
     private int currentIndex = 0;
 
+    // Dışarıdan mevcut seviye indeksini okumak için
+    public int CurrentIndex => currentIndex;
+
     //Mevcut seviyenin çözücü tarafından bulunan tekil çözümü.
     private System.Collections.Generic.List<Shikaku_Solver.SolutionRect> currentSolution;
 
@@ -66,6 +69,8 @@ public class LevelManager : MonoBehaviour
         if (gameManager != null)
         {
             gameManager.ResetWinState();
+            // Üst bardaki Level yazısını güncelle (1-based: Level 1, Level 2...)
+            gameManager.UpdateLevelText(currentIndex + 1);
         }
 
         gridManager.LoadLevel(levels[currentIndex]);

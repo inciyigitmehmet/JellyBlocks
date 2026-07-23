@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Collections;
 using UnityEngine;
+using DG.Tweening;
 
 public class Selection_Manager : MonoBehaviour
 {
@@ -113,6 +114,12 @@ public class Selection_Manager : MonoBehaviour
 
     void HandleTouchDown()
     {
+        // 1. GEÇİŞ EKRANI KONTROLÜ (Input'u Devre Dışı Bırak)
+        if (gameManager != null && gameManager.isLevelWon)
+        {
+            return;
+        }
+
         Vector2Int clickedCoords = GetCurrentTileCoords();
 
         // --- İPUCU (HINT) MODU KONTROLÜ ---
@@ -133,12 +140,28 @@ public class Selection_Manager : MonoBehaviour
             }
             // Başarılı veya başarısız, bir yere tıklayınca hint modundan çık
             isHintModeActive = false;
+            if (gameManager != null && gameManager.hintButtonRect != null)
+            {
+                // Butonu eski boyutuna geri getir
+                gameManager.hintButtonRect.DOScale(Vector3.one, 0.2f).SetEase(Ease.InBack);
+            }
             return;
         }
 
         // Tıklanılan yer grid sınırları içerisindeyse seçime başla.
         if (gridManager != null && clickedCoords.x >= 0 && clickedCoords.x < gridManager.width && clickedCoords.y >= 0 && clickedCoords.y < gridManager.height)
         {
+            // 2. TAMAMLANMIŞ HÜCRE KONTROLÜ
+            GameObject clickedTileObj = gridManager.GetTileAt(clickedCoords.x, clickedCoords.y);
+            if (clickedTileObj != null)
+            {
+                Tile tileComp = clickedTileObj.GetComponent<Tile>();
+                // Eğer tıklanan hücre zaten doluysa (isFilled == true), yeni seçim başlatmaya izin verme!
+                if (tileComp != null && tileComp.isFilled)
+                {
+                    return;
+                }
+            }
             //Önceki sürüklemeden kalan sahipsiz obje varsa yok ediyoruz.
             if (currentSelectionObj != null)
             {
@@ -205,13 +228,10 @@ public class Selection_Manager : MonoBehaviour
                 SpriteRenderer shadowSr = shadowObj.AddComponent<SpriteRenderer>();
                 shadowSr.sprite = currentSpriteRenderer.sprite;
                 shadowSr.sortingOrder = 19; // Sürüklerken gölge de üstte olsun
-                
-                // Sürüklerken gölgeyi (ikinci katmanı) tamamen Kapatıyoruz!
-                // Böylece şeffaflıklar üst üste binip çirkin bir görüntü oluşturmaz.
                 shadowSr.enabled = false; 
 
-                // Gölgenin rengini kenarlık ile aynı ve saydamlığını dragAlpha yapıyoruz
-                Color sColor = lineColor;
+                // Gölgenin rengini blok renginin hafif koyu (gölgeli) bir tonu yapıyoruz (Fayansın yan yüzeyi gibi)
+                Color sColor = pickedColor * 0.65f;
                 sColor.a = dragAlpha;
                 shadowSr.color = sColor;
 
@@ -460,12 +480,14 @@ public class Selection_Manager : MonoBehaviour
                 0f
             );
             Color placedColor = currentSpriteRenderer != null ? currentSpriteRenderer.color : Color.white;
+            
             // 1) Combo bar güncelle (renk + multiplier)
             if (ComboBarManager.Instance != null)
                 ComboBarManager.Instance.OnSuccessfulFill(placedColor, blockWorldCenter);
+            
             // 2) Skoru hesapla (güncel multiplier kullanır)
             if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddScore(selectedArea);
+                ScoreManager.Instance.AddScore(selectedArea, placedColor);
 
             if (gameManager != null)
             {
@@ -480,6 +502,12 @@ public class Selection_Manager : MonoBehaviour
             if (AudioManager.Instance != null)
             {
                 AudioManager.Instance.PlayErrorSound(); // Sadece metal çınlama sesi çalsın
+            }
+
+            // --- YENİ MEKANİK: HATALI HAMLEDE COMBO BOZULUR! ---
+            if (ComboBarManager.Instance != null)
+            {
+                ComboBarManager.Instance.ResetCombo();
             }
 
             // --- HATALI HAMLE GÖRSELİ (KIRMIZI YANIP SÖNME) ---
@@ -540,12 +568,17 @@ public class Selection_Manager : MonoBehaviour
         }
 
         // Eğer tek sayı varsa, çakışma yoksa ve alan o sayıya tam eşitse belirgin (0.8f), aksi halde silik (0.3f)
-        float targetAlpha = (numberCount == 1 && selectedArea == foundNumber && !hasOverlap) ? 0.85f : dragAlpha;
+        float baseAlpha = (numberCount == 1 && selectedArea == foundNumber && !hasOverlap) ? 0.85f : dragAlpha;
+
+        // --- PULSE (KALP ATIŞI) EFEKTİ ---
+        // Zaman bazlı sinüs dalgası ile alpha değerini yumuşak bir şekilde titreştiriyoruz.
+        // Hızını yavaşlattık (8f -> 4f) ki daha sakin ve Zen bir his versin.
+        float pulseAlpha = baseAlpha * (0.8f + 0.2f * Mathf.Sin(Time.time * 4f));
 
         if (currentSpriteRenderer != null)
         {
             Color c = currentSpriteRenderer.color;
-            c.a = targetAlpha;
+            c.a = pulseAlpha;
             currentSpriteRenderer.color = c;
         }
 
@@ -558,15 +591,22 @@ public class Selection_Manager : MonoBehaviour
         float width = Mathf.Abs(startCoords.x - currentCoords.x) + 1;
         float height = Mathf.Abs(startCoords.y - currentCoords.y) + 1;
 
-        float shadowThickness = 0.08f; 
-        float paddingX = 0.06f;
-        float paddingY = 0.12f;
+        // FAYANS (CERAMIC TILE) ESTETİĞİ İÇİN GÜNCELLEMELER:
+        // 1. Fayanslar duvara yapışık olur, çok derin gölgeleri olmaz. O yüzden çok ince ve zarif bir kalınlık veriyoruz.
+        float shadowThickness = 0.03f; 
+        
+        // 2. Fayanslar arasına çok ince bir derz (grout) boşluğu bırakıyoruz ki yan yana geldiklerinde 
+        // birbirlerine yapışıp tek bir leke gibi görünmesinler, ayrı ayrı fayans oldukları belli olsun.
+        float paddingX = 0.03f;
+        float paddingY = 0.03f;
 
+        // Gölgeyi eklerken bloğun tam ortada kalması için Y merkezini çok hafif yukarı alıyoruz
         float visualCenterY = centerY + (shadowThickness / 2f); 
 
         // Z eksenini -0.1f yapıyoruz ki gridin önünde dursun.
         currentSelectionObj.transform.position = new Vector3(centerX, visualCenterY, -0.1f);
 
+        // Genişlik ve yüksekliği grid ölçüsünden derz boşluğunu çıkararak hesaplıyoruz
         float visualWidth = width - paddingX;
         float visualHeight = height - paddingY;
         
@@ -588,7 +628,7 @@ public class Selection_Manager : MonoBehaviour
                 shadowSr.drawMode = SpriteDrawMode.Sliced;
                 shadowSr.size = new Vector2(visualWidth, visualHeight);
                 Color sc = shadowSr.color;
-                sc.a = targetAlpha;
+                sc.a = baseAlpha; // Gölge de nabızla solmasın diye baseAlpha kullanıyoruz. (İstersen pulseAlpha da yapabilirsin)
                 shadowSr.color = sc;
             }
             shadowTransform.localPosition = new Vector3(0, -shadowThickness, 0.05f);
@@ -780,71 +820,125 @@ public class Selection_Manager : MonoBehaviour
         }
     }
 
-    // Bölüm bittiğinde tüm kalıcı taşlara katana darbesi yemiş gibi bir titreme (Tremble) efekti verir
-    public void TriggerWinTremble()
+    // Bölüm bittiğinde tüm kalıcı taşlara zıplama ve dökülme (Pop & Drop) animasyonu verir
+    public void TriggerWinAnimation()
     {
+        // Önce başarı sesini çal
+        if (AudioManager.Instance != null)
+        {
+            // AudioManager'da PlaySuccessSound yoksa diye PlaySlashSound kullanabiliriz ama genelde vardır. 
+            // Şimdilik sorun çıkmasın diye var olan Slash sesini kullanıyoruz. Eğer eklersen PlaySuccessSound yaparsın.
+            AudioManager.Instance.PlaySlashSound();
+        }
+
+        // Tüm objeleri sırayla (ufak bir gecikmeyle) uçurmak için bir sayaç
+        float delay = 0f;
         foreach (GameObject obj in permanentSelections)
         {
             if (obj != null)
             {
-                StartCoroutine(TrembleRoutine(obj));
+                StartCoroutine(PopAndDropRoutine(obj, delay));
+                delay += 0.05f; // Her blok 0.05 saniye gecikmeyle fırlayacak
             }
         }
     }
 
-    private IEnumerator TrembleRoutine(GameObject obj)
+    private IEnumerator PopAndDropRoutine(GameObject obj, float delay)
     {
-        Vector3 startPos = obj.transform.localPosition;
-        float duration = 1.2f; // Çok daha uzun ve dingin bir geri dönüş süresi (Titreme uzatıldı)
-        float elapsed = 0f;
-
-        // Orijinal rengi kaydet (Parlama efekti için)
-        SpriteRenderer sr = obj.GetComponent<SpriteRenderer>();
-        Color originalColor = Color.white;
-        if (sr != null) originalColor = sr.color;
-
-        // Kılıç dalgası (ripple) için ufak gecikme
-        yield return new WaitForSeconds(Random.Range(0f, 0.15f));
+        yield return new WaitForSeconds(delay);
 
         if (obj == null) yield break;
 
-        // 1. Kılıcın vuruş açısı (Rastgele bir yön)
-        float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
-        // Kılıcın darbesiyle taşın aniden kaydığı nokta (Barbarca titremek yerine tek bir keskin darbe)
-        Vector3 strikeOffset = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0) * 0.12f;
+        Vector3 startPos = obj.transform.localPosition;
+        Vector3 startScale = obj.transform.localScale;
+        Quaternion startRot = obj.transform.localRotation;
         
-        // Taş darbeyi yediği an milisaniyede sarsıntıyla kayar
-        obj.transform.localPosition = startPos + strikeOffset;
+        // 1. ZIPLAMA (POP OUT) - Daha 'Snappy' ve tok
+        float popDuration = 0.2f;
+        float elapsed = 0f;
+        
+        // SİHİRLİ DOKUNUŞ: Büyürken üst üste binmemeleri için onları merkezden (0,0) dışarı doğru hafifçe İTİYORUZ (Spread efekti).
+        // Pozisyonlarını %18 dışarı itip, kendilerini %12 büyütüyoruz. Böylece büyümelerine rağmen araları açılıyor!
+        Vector3 spreadPos = new Vector3(startPos.x * 1.18f, startPos.y * 1.18f, startPos.z);
+        Vector3 popPos = spreadPos + new Vector3(0, 0, -1.5f); // Z ekseninde öne çıkış
+        Vector3 popScale = startScale * 1.12f; // %12 Büyüme (Artık küçülmüyorlar!)
 
-        // 2. Dingin bir şekilde (Ease-out) yerine geri kayması
-        while (elapsed < duration)
+        while (elapsed < popDuration)
         {
             if (obj == null) yield break;
-            
             elapsed += Time.deltaTime;
-            float t = elapsed / duration;
-            float smoothT = 1f - Mathf.Pow(1f - t, 3f); // Cubic ease-out (hızlı başlar, yumuşak biter)
+            float t = elapsed / popDuration;
+            float easeT = 1f - Mathf.Pow(1f - t, 4f); // Quartic ease out (çok hızlı çıkıp havada yavaşlar)
             
-            obj.transform.localPosition = Vector3.Lerp(startPos + strikeOffset, startPos, smoothT);
+            obj.transform.localPosition = Vector3.Lerp(startPos, popPos, easeT);
+            obj.transform.localScale = Vector3.Lerp(startScale, popScale, easeT);
+            yield return null;
+        }
 
-            // Kesik anında tam beyaz/şeffaf olur, sonra yumuşakça normale döner
-            if (sr != null)
-            {
-                float flashAmount = 1f - smoothT; 
-                Color flashColor = Color.Lerp(originalColor, Color.white, flashAmount * 0.6f);
-                flashColor.a = Mathf.Lerp(originalColor.a, 0.4f, flashAmount); 
-                
-                sr.color = flashColor;
-            }
+        // 2. HAVADA ASILI KALMA VE TİTREME (Anticipation)
+        float hangDuration = 0.5f; // Süreyi %25-30 civarı kısalttık (Çok beklemesinler)
+        elapsed = 0f;
+        
+        while (elapsed < hangDuration)
+        {
+            if (obj == null) yield break;
+            elapsed += Time.deltaTime;
+            
+            // "Düştü düşecek" titremesi: Şiddeti giderek artar.
+            float shakeAmount = Mathf.Lerp(0.01f, 0.05f, elapsed / hangDuration); 
+            
+            // Titremenin frekansını biraz ARTIRDIK (30 -> 45). Daha gergin bir sallantı hissi verecek.
+            float offsetX = Mathf.Sin(Time.time * 45f) * shakeAmount;
+            float offsetY = Mathf.Cos(Time.time * 50f) * shakeAmount;
+            Vector3 shakeOffset = new Vector3(offsetX, offsetY, 0);
+            
+            // Minik Rotasyon (Dönme) Titremesi eklendi! Max 3 dereceye kadar dönecek
+            float rotZ = Mathf.Sin(Time.time * 55f) * (shakeAmount * 60f);
+            
+            obj.transform.localPosition = popPos + shakeOffset;
+            obj.transform.localRotation = Quaternion.Euler(0, 0, rotZ);
+            yield return null;
+        }
+
+        // 3. DAĞILARAK DÖKÜLME (Fizik Simülasyonu ile)
+        if (obj == null) yield break;
+        
+        // Ekrandan çıkmadan yok olmalarını önlemek için düşüş süresini çok uzattık (0.7f -> 1.5f)
+        float dropDuration = 1.5f; 
+        elapsed = 0f;
+        
+        // Parabolik Düşüş (Saçılma) değişkenleri
+        float randomDirX = Random.Range(-5f, 5f); // Sağa sola patlama hızı
+        float gravity = -40f; // Sert bir yerçekimi
+        float velocityY = Random.Range(2f, 7f); // Koparken ufak bir yukarı sekme
+        float rotationSpeed = Random.Range(-200f, 200f); // Havada taklalar atarak dönme
+        
+        Vector3 currentPos = popPos;
+        float currentRotZ = startRot.eulerAngles.z;
+
+        while (elapsed < dropDuration)
+        {
+            if (obj == null) yield break;
+            elapsed += Time.deltaTime;
+            
+            // Fiziği uygula
+            velocityY += gravity * Time.deltaTime;
+            currentPos.x += randomDirX * Time.deltaTime;
+            currentPos.y += velocityY * Time.deltaTime;
+            
+            // Dönmeyi uygula
+            currentRotZ += rotationSpeed * Time.deltaTime;
+
+            obj.transform.localPosition = currentPos;
+            obj.transform.localRotation = Quaternion.Euler(0, 0, currentRotZ);
             
             yield return null;
         }
 
-        // Efekt bitince milimetrik olarak eski yerine oturt ve orijinal rengi geri ver
+        // Ekrandan tamamen çıktıktan sonra kapat
         if (obj != null)
         {
-            obj.transform.localPosition = startPos;
-            if (sr != null) sr.color = originalColor;
+            obj.SetActive(false);
         }
     }
 
@@ -853,14 +947,39 @@ public class Selection_Manager : MonoBehaviour
     // UI'daki Katana butonuna basınca çağrılır
     public void ToggleHintMode()
     {
-        isHintModeActive = !isHintModeActive;
-        if (isHintModeActive)
+        // Eğer ipucu kalmadıysa açılmasına izin verme ve titret (hata hissi)
+        if (gameManager != null && gameManager.currentHints <= 0)
         {
-            Debug.Log("Katana Hint Modu Aktif! Ekranda çözemediğiniz bir sayıya tıklayın.");
+            if (gameManager.hintButtonRect != null)
+            {
+                // Üst üste tıklayınca rotasyonun bozulup ters dönmemesi için:
+                // Önceki animasyonu durdur ve rotasyonu tamamen sıfırla
+                gameManager.hintButtonRect.DOKill();
+                gameManager.hintButtonRect.localRotation = Quaternion.identity;
+                gameManager.hintButtonRect.localScale = Vector3.one;
+                
+                gameManager.hintButtonRect.DOPunchRotation(new Vector3(0, 0, 15f), 0.3f, 10, 1f);
+            }
+            if (AudioManager.Instance != null) AudioManager.Instance.PlayErrorSound();
+            return;
         }
-        else
+
+        isHintModeActive = !isHintModeActive;
+        
+        if (gameManager != null && gameManager.hintButtonRect != null)
         {
-            Debug.Log("Katana Hint Modu İptal Edildi.");
+            if (isHintModeActive)
+            {
+                // Butonu hafifçe büyüt ki aktif olduğu belli olsun
+                gameManager.hintButtonRect.DOScale(new Vector3(1.15f, 1.15f, 1f), 0.2f).SetEase(Ease.OutBack);
+                Debug.Log("Katana Hint Modu Aktif! Ekranda çözemediğiniz bir sayıya tıklayın.");
+            }
+            else
+            {
+                // İptal edilirse tekrar eski haline dönsün
+                gameManager.hintButtonRect.DOScale(Vector3.one, 0.2f).SetEase(Ease.InBack);
+                Debug.Log("Katana Hint Modu İptal Edildi.");
+            }
         }
     }
 
@@ -1002,12 +1121,14 @@ public class Selection_Manager : MonoBehaviour
                 ComboBarManager.Instance.OnSuccessfulFill(hintColor, hintCenter);
             // 2) Skoru hesapla (güncel multiplier kullanır)
             if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddScore(hintArea);
+                ScoreManager.Instance.AddScore(hintArea, hintColor);
 
             // Kazanma durumu kontrolü
             GameManager gameManager = FindAnyObjectByType<GameManager>();
             if (gameManager != null)
             {
+                // İPUCUNU TÜKET (SAYIYI AZALT)
+                gameManager.ConsumeHint();
                 gameManager.CheckWinCondition();
             }
         }

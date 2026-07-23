@@ -42,11 +42,19 @@ public class ScoreManager : MonoBehaviour
     /// Selection_Manager başarılı hamle sonrası çağırır.
     /// ComboBarManager.OnSuccessfulFill zaten çağrılmış olmalı ki doğru multiplier gelsin.
     /// </summary>
-    public void AddScore(int cellCount)
+    public void AddScore(int cellCount, Color blockColor)
     {
         int combo  = ComboBarManager.Instance != null ? ComboBarManager.Instance.CurrentCombo : 1;
         int gained = cellCount * pointsPerCell * combo;
         _totalScore += gained;
+        
+        // Puan yazısının rengini jölenin rengine boyuyoruz
+        if (scoreLabel != null)
+        {
+            blockColor.a = 1f;
+            scoreLabel.color = blockColor;
+        }
+
         AnimateScore();
     }
 
